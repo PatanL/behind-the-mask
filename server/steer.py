@@ -98,6 +98,11 @@ class Mind:
     _coef: torch.Tensor | None = None        # [B, E] live steering coefficients (units of residual norm)
     _captured: torch.Tensor | None = None    # [B, H] hidden state of the last position before injection
     _hook: object = None
+    labels: list = field(default_factory=lambda: list(EMOTIONS))   # direction names (emotions + "assistant")
+    mask_scale: list | None = None           # [persona mean, assistant mean] projection on the assistant axis
+    sae: dict | None = None                  # Qwen-Scope SAE {W_enc, b_enc, layer, k}
+    _sae_h: torch.Tensor | None = None
+    _sae_hook: object = None
 
     @property
     def device(self):
@@ -105,7 +110,7 @@ class Mind:
 
     @property
     def n_layers(self) -> int:
-        return self.model.config.num_hidden_layers
+        return self.model.config.get_text_config().num_hidden_layers
 
     # ------------------------------------------------------------------ directions
     @torch.no_grad()
@@ -167,6 +172,32 @@ class Mind:
         self.directions, self.norms = d["directions"].to(self.device), d["norms"].to(self.device)
         self.ro_mu, self.ro_sd = d["ro_mu"].to(self.device), d["ro_sd"].to(self.device)
         self.layer = d["layer"]
+        self.labels = list(d.get("emotions", EMOTIONS))
+        self.mask_scale = d.get("mask_scale")
+
+    # ------------------------------------------------------------------ SAE features (Qwen-Scope)
+    def load_sae(self, path: str, layer: int, k: int = 50):
+        """TopK SAE on the residual stream *after* decoder layer `layer` (Qwen-Scope hook point)."""
+        d = torch.load(path, map_location="cpu")
+        self.sae = {"W_enc": d["W_enc"].to(self.device, torch.bfloat16), "b_enc": d["b_enc"].to(self.device, torch.bfloat16), "layer": layer, "k": k}
+        if self._sae_hook:
+            self._sae_hook.remove()
+        mind = self
+
+        def fwd_hook(module, args, output):
+            h = output[0] if isinstance(output, tuple) else output
+            mind._sae_h = h[:, -1, :].detach()
+
+        self._sae_hook = self.model.model.layers[layer].register_forward_hook(fwd_hook)
+
+    def sae_features(self, top: int = 8):
+        """Top active SAE features for the last position of each batch row: list of [(id, act)]."""
+        if not self.sae or self._sae_h is None:
+            return None
+        pre = self._sae_h.to(torch.bfloat16) @ self.sae["W_enc"].T + self.sae["b_enc"]  # [B, F]
+        v, i = torch.topk(pre.float(), self.sae["k"], dim=-1)
+        v, i = v[:, :top], i[:, :top]
+        return [[(int(a), round(float(b), 2)) for a, b in zip(ii, vv)] for ii, vv in zip(i.tolist(), v.tolist())]
 
     # ------------------------------------------------------------------ steering hook
     def install(self):
@@ -209,5 +240,6 @@ def load_mind(name: str, repo: str, is_chat: bool, layer_frac: float = 0.5, dtyp
     tok = AutoTokenizer.from_pretrained(repo)
     model = AutoModelForCausalLM.from_pretrained(repo, dtype=dtype, device_map=device)
     model.eval()
-    layer = max(1, min(model.config.num_hidden_layers - 1, round(model.config.num_hidden_layers * layer_frac)))
+    nl = model.config.get_text_config().num_hidden_layers
+    layer = max(1, min(nl - 1, round(nl * layer_frac)))
     return Mind(name=name, model=model, tokenizer=tok, is_chat=is_chat, layer=layer)

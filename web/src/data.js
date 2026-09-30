@@ -1,12 +1,15 @@
 // Pre-computed performances (see server/precompute.py). Each one holds four streams token by token.
 const cache = new Map();
+// ?data=performances9 lets a new data set be previewed before it replaces the live one
+const DATA = new URLSearchParams(location.search).get('data') || 'performances';
 let indexPromise = null;
 export function loadIndex() {
-  indexPromise ||= fetch('/performances/index.json').then((r) => r.json());
+  const B = import.meta.env.BASE_URL;
+  indexPromise ||= fetch(`${B}${DATA}/index.json`).then((r) => r.json());
   return indexPromise;
 }
 export async function loadPerformance(id) {
-  if (!cache.has(id)) cache.set(id, fetch(`/performances/${id}.json`).then((r) => r.json()));
+  if (!cache.has(id)) cache.set(id, fetch(`${import.meta.env.BASE_URL}${DATA}/${id}.json`).then((r) => r.json()));
   return cache.get(id);
 }
 export function performanceId(index, qid, emotion, level) {
@@ -33,3 +36,5 @@ export function pushInfo(tok) {
   const shown = tipped && w.length >= 3 && !STOP.has(w) && tok.p >= 0.12 && ratio >= 3;
   return { ratio, cfP: cf.p, cfExact: cf.exact, cfTop, pushed: tipped, shown };
 }
+
+export const DATA_DIR = DATA;

@@ -217,13 +217,29 @@ uniform float uWrap;
 uniform vec2 uFade;         // object-space y (m) where the neck fades to black
 varying vec2 vSeamUv;
 varying vec3 vObjPos;
-float seamDist(vec2 uv) { return texture2D(uSeamMap, uv).g * uSeamRange; }
+// Procedural panel seams, defined on the rest (un-morphed) head in object space (metres), so they ride along
+// with the skin when it moves. Landmarks: eyes (+-0.0312, 0.0356), nose tip (0, 0.001), lips ~ y -0.025..-0.04,
+// chin -0.085, brow ridge ~0.06, crown 0.124. Returns distance to the nearest seam in millimetres.
+float segD(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
+float ellD(vec2 p, vec2 c, vec2 r) { vec2 q = (p - c) / r; float k = length(q); return abs(k - 1.0) * min(r.x, r.y); }
+float seamField(vec3 P) {
+  vec2 p = P.xy; float ax = abs(P.x); vec2 pa = vec2(ax, P.y);
+  float d = 1e3;
+  if (P.y > 0.074) d = min(d, ax);                                                  // crown midline
+  if (ax < 0.072) d = min(d, abs(P.y - (0.071 + 0.010 * (ax / 0.07) * (ax / 0.07))));  // brow band
+  d = min(d, ellD(pa, vec2(0.0312, 0.0350), vec2(0.0245, 0.0165)));                  // eye rings
+  d = min(d, segD(pa, vec2(0.0545, 0.0230), vec2(0.0590, -0.0420)));                 // cheek plates
+  d = min(d, segD(pa, vec2(0.0590, -0.0420), vec2(0.0290, -0.0760)));                // jaw line
+  if (P.y < -0.030) d = min(d, ellD(p, vec2(0.0, -0.030), vec2(0.0335, 0.0300)));     // chin plate
+  if (P.y > -0.03 && P.y < 0.10) d = min(d, abs(ax - 0.0760));                       // temples
+  if (P.z < 0.05) d = min(d, abs(P.z - 0.020) + max(0.0, P.y - 0.13));              // skull cap / nape ring
+  return d * 1000.0;
+}
+float seamDist(vec2 uv) { return seamField(vObjPos); }
 float seamH(vec2 uv) {
-  vec4 s = texture2D(uSeamMap, uv);
-  float x = s.g * uSeamRange / uSeamWidth;
-  // rounded V groove with a soft shoulder
-  float h = 1.0 - smoothstep(0.0, 1.0, x);
-  return -uSeamDepth * h * h * s.b * uHasSeams;
+  float x = seamField(vObjPos) / uSeamWidth;
+  float h = 1.0 - smoothstep(0.0, 1.0, x);   // rounded V groove with a soft shoulder
+  return -uSeamDepth * h * h * uHasSeams;
 }
 vec3 seamPerturb(vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir) {
   vec3 vSigmaX = dFdx(surf_pos);
@@ -359,8 +375,8 @@ export class AndroidFace {
     const pending = [];
 
     this.uniforms = {
-      uSeamMap: { value: null }, uSeamRange: { value: 2.0 }, uSeamWidth: { value: 0.34 }, uSeamDepth: { value: 0.00022 },
-      uSeamDark: { value: 0.28 }, uGlowColor: { value: this.irisColor.clone() }, uGlow: { value: 0.0 }, uHasSeams: { value: 0 },
+      uSeamMap: { value: null }, uSeamRange: { value: 2.0 }, uSeamWidth: { value: 0.55 }, uSeamDepth: { value: 0.00035 },
+      uSeamDark: { value: 0.28 }, uGlowColor: { value: this.irisColor.clone() }, uGlow: { value: 0.0 }, uHasSeams: { value: 1 },
       uSSS: { value: new THREE.Color(1.0, 0.62, 0.45).multiplyScalar(0.55) }, uWrap: { value: 0.45 },
       uFade: { value: new THREE.Vector2(-0.100, -0.165) },
     };
@@ -450,7 +466,7 @@ export class AndroidFace {
         .replace('#include <common>', '#include <common>\n' + PORCELAIN_PARS)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float sDist = seamDist(vSeamUv);
-          float sStr = texture2D(uSeamMap, vSeamUv).b * uHasSeams;
+          float sStr = uHasSeams * smoothstep(-0.02, 0.03, vObjPos.z);  // fade seams out toward the back of the head
           float sFw = max(fwidth(sDist), 1e-4);
           float sCore = (1.0 - smoothstep(uSeamWidth * 0.42 - sFw, uSeamWidth * 0.42 + sFw, sDist)) * sStr;
           float sLip = (1.0 - smoothstep(0.0, uSeamWidth * 1.6 + sFw, sDist)) * sStr;
@@ -459,9 +475,8 @@ export class AndroidFace {
         `)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           {
-            vec2 dSTdx = dFdx(vSeamUv), dSTdy = dFdy(vSeamUv);
             float h0 = seamH(vSeamUv);
-            vec2 dH = vec2(seamH(vSeamUv + dSTdx) - h0, seamH(vSeamUv + dSTdy) - h0);
+            vec2 dH = vec2(dFdx(h0), dFdy(h0));
             normal = seamPerturb(-vViewPosition, normal, dH, faceDirection);
           }
         `)
@@ -477,7 +492,7 @@ export class AndroidFace {
           outgoingLight *= smoothstep(uFade.y, uFade.x, vObjPos.y);
           #include <opaque_fragment>`);
     };
-    m.customProgramCacheKey = () => 'porcelain-v1';
+    m.customProgramCacheKey = () => 'porcelain-v2';
     (this._porcelainMats ||= []).push(m);
     return m;
   }

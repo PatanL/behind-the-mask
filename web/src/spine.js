@@ -47,7 +47,7 @@ export class Spine {
     this.inj.setAttribute('stroke', c);
     this.inj.style.filter = emotion ? `drop-shadow(0 0 6px ${c})` : 'none';
     this.injLabel.setAttribute('fill', emotion ? c : '#6b7290');
-    this.injLabel.textContent = emotion ? `+ ${EMO[emotion].label.toLowerCase()} here` : `layer ${this.layer} of ${this.nLayers}`;
+    this.injLabel.textContent = emotion === 'unmask' ? '− assistant here' : emotion ? `+ ${EMO[emotion].label.toLowerCase()} here` : `layer ${this.layer} of ${this.nLayers}`;
   }
   pulse() {
     const c = document.createElementNS(NS, 'circle');

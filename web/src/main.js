@@ -3,18 +3,31 @@ import '@fontsource/fraunces/500.css';
 import '@fontsource/fraunces/400-italic.css';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/600.css';
+import * as THREE from 'three';
 import { EMO, ORDER, LEVELS } from './palette.js';
-import { loadIndex, loadPerformance, performanceId, pushInfo } from './data.js';
+import { loadIndex, loadPerformance, performanceId, pushInfo, DATA_DIR } from './data.js';
 import { Speech } from './speech.js';
 import { Spine } from './spine.js';
 import { Stage } from './stage.js';
 import { HOW_STEPS } from './how.js';
 import { FeelMap } from './feelmap.js';
+import { initRealSection } from './real.js';
+const initReal = () => initRealSection(document.querySelector('#real'));
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 const state = { index: null, qid: null, emotion: 'joy', level: 'lot', playing: false, doc: null, runId: 0, lastTouch: Date.now(), attract: false };
 const GAIN = Number(params.get('gain') || 1.4);
+let FEATS = null;
+
+/** How "assistant-like" the model's state is: 0 = like its role-play personas, 1 = like its own assistant voice. */
+function maskOf(z, mind = 'chat') {
+  const ix = state.index; if (!ix?.mask_scale?.[mind] || !ix.ro?.[mind]) return null;
+  const k = ix.labels.indexOf('assistant'); if (k < 0) return null;
+  const [mu, sd] = ix.ro[mind], [s0, s1] = ix.mask_scale[mind];
+  const p = z[k] * sd[k] + mu[k];
+  return Math.max(0, Math.min(1, (p - s0) / (s1 - s0)));
+}
 
 const stage = new Stage($('#face-canvas'));
 const spine = new Spine($('#spine'), $('#meters'));
@@ -45,6 +58,7 @@ function buildControls() {
   ORDER.forEach((e) => feel(e));
   feel('none', 'none');
   feel('swing', 'swing');
+  if (state.index.questions.some((q) => q.performances['unmask|lot'])) feel('unmask', 'unmask');
   const am = $('#amount');
   for (const [k, label] of LEVELS) {
     const b = document.createElement('button');
@@ -69,7 +83,9 @@ function refresh() {
   go.classList.toggle('busy', state.playing);
   go.querySelector('span').textContent = state.playing ? 'Speaking' : 'Let it speak';
   $('#go-note').textContent = !state.qid ? 'Choose a question first.' : state.emotion === 'none' ? 'No push: the assistant exactly as it was trained.'
-    : state.emotion === 'swing' ? 'Starts with one feeling, then we switch it mid-sentence.' : `We'll add the ${EMO[state.emotion].label.toLowerCase()} direction inside it while it writes.`;
+    : state.emotion === 'swing' ? 'Starts with one feeling, then we switch it mid-sentence.'
+    : state.emotion === 'unmask' ? 'We push it away from its “helpful assistant” direction: the persona it was trained into.'
+    : `We'll add the ${EMO[state.emotion].label.toLowerCase()} direction inside it while it writes.`;
 }
 
 // ------------------------------------------------------------------ playback
@@ -110,6 +126,9 @@ async function play(opts = {}) {
   feelmap.reset(); feelmap.setFocus(focus);
   stage.face.setActivity({ writing: true });
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
+  const maskPlain = plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1;
+  let maskEma = maskPlain;
+  setMask(maskEma);
   for (let i = 0; i < steered.length; i++) {
     if (run !== state.runId) return;
     const tok = steered[i];
@@ -117,11 +136,18 @@ async function play(opts = {}) {
     if (e2 && doc.swing_at != null && i === doc.swing_at) { focus = e2; setPush(focus, 'lot', 'swing'); feelmap.setFocus(focus); swingMark = true; }
     const delta = {};
     ORDER.forEach((e, k) => { delta[e] = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (delta[e] - ema[e]) * 0.28; });
-    speech.add(i, tok, ema, focus, { swingMark });
+    const mk = maskOf(tok.e);
+    if (mk != null) { maskEma += (mk - maskEma) * 0.2; setMask(maskEma); }
+    const tint = focus === 'unmask' ? { ...ema, unmask: Math.max(0, Math.min(1, (maskPlain - maskEma) * 1.6)) } : ema;
+    showFeatures(tok);
+    speech.add(i, tok, tint, focus, { swingMark });
     spine.pulse();
     spine.setMeters(ema);
     feelmap.setState(ema);
-    stage.face.setEmotion(ema, { intensity: doc.level === 'toomuch' ? 1.25 : 1.0 });
+    // expression gain: mild signals should still read on the face from across a room
+    const faceIn = Object.fromEntries(ORDER.map((e) => [e, Math.min(1, 1.25 * Math.pow(ema[e], 0.7))]));
+    stage.face.setEmotion(faceIn, { intensity: doc.level === 'toomuch' ? 1.25 : 1.0 });
+    stage.setGlow(focus ? Math.max(0.15, Math.min(1, (focus === 'unmask' ? tint.unmask : ema[focus]) * 1.3)) : 0.15);
     const t = tok.t;
     let wait = 62 + Math.min(80, t.length * 6);
     if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
@@ -137,6 +163,22 @@ async function play(opts = {}) {
   showReveals(doc);
 }
 
+function setMask(v) {
+  const el = $('#mask-meter'); if (!el || v == null || !state.index?.mask_scale) return;
+  el.hidden = false;
+  el.querySelector('i').style.width = `${Math.round(v * 100)}%`;
+  el.querySelector('b').textContent = `${Math.round(v * 100)}%`;
+}
+
+let featTimer = 0;
+function showFeatures(tok) {
+  const host = $('#features'); if (!host || !FEATS || !tok.f) return;
+  const now = performance.now(); if (now - featTimer < 420) return; featTimer = now;
+  const rows = tok.f.map(([id, v]) => [FEATS.features[String(id)], v]).filter(([f]) => f && f.label).slice(0, 3);
+  if (!rows.length) return;
+  host.innerHTML = rows.map(([f, v]) => `<div class="feat" title="${esc(f.examples?.[0] || '')}"><span>${esc(f.label)}</span><i style="width:${Math.min(100, 20 + v * 6)}%"></i></div>`).join('');
+}
+
 function setPush(emotion, level, swing) {
   const badge = $('#push-badge');
   spine.setPush(emotion);
@@ -147,7 +189,7 @@ function setPush(emotion, level, swing) {
   }
   const lv = { little: 'a little', lot: 'a lot', toomuch: 'way too much', swing: '' }[level] ?? '';
   badge.hidden = false;
-  badge.textContent = swing === 'swing' ? `Switched to ${EMO[emotion].label}!` : `Pushing ${EMO[emotion].label.toLowerCase()}${lv ? ' · ' + lv : ''}`;
+  badge.textContent = swing === 'swing' ? `Switched to ${EMO[emotion].label}!` : emotion === 'unmask' ? `Pushing against its assistant persona${lv ? ' · ' + lv : ''}` : `Pushing ${EMO[emotion].label.toLowerCase()}${lv ? ' · ' + lv : ''}`;
   document.documentElement.style.setProperty('--push', EMO[emotion].color);
   stage.setPushColor(EMO[emotion].color, level === 'little' ? 0.35 : level === 'toomuch' ? 1 : 0.7);
   stage.face.setIrisColor(EMO[emotion].color);
@@ -204,7 +246,9 @@ function renderBase() {
   const s = doc.streams[which];
   $('#base-push').parentElement.style.display = doc.emotion === 'none' ? 'none' : '';
   const text = s.text.replace(/\n\s*Q?:?\s*$/, '').trim();
-  $('#base-text').innerHTML = s.safe === false || !text ? '<em>(The base model wrote something we don’t show in this exhibit, or nothing at all. Base models are unfiltered.)</em>' : esc(text);
+  const invented = text.split(/\n+/).map((line, i) => (i > 0 && /^\s*(Q|A):/.test(line) ? `<span class="invented">${esc(line)}</span>` : esc(line))).join('<br>');
+  const inventedNote = /\n\s*Q:/.test(text) ? '<div class="invented-note">It kept going, and wrote the next questions itself. A base model only continues text; nobody taught it to stop and answer.</div>' : '';
+  $('#base-text').innerHTML = s.safe === false || !text ? '<em>(The base model wrote something we don’t show in this exhibit, or nothing at all. Base models are unfiltered.)</em>' : invented + inventedNote;
 }
 
 // ------------------------------------------------------------------ word inspector
@@ -256,7 +300,7 @@ $('#how-next').onclick = () => { if (howI < HOW_STEPS.length - 1) { howI++; rend
 // ------------------------------------------------------------------ attract mode (kiosk)
 function touch() { state.lastTouch = Date.now(); if (state.attract) { state.attract = false; $('#caption').textContent = ''; } }
 ['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, () => { state.lastTouch = Date.now(); if (state.attract) { state.attract = false; state.runId++; state.playing = false; $('#caption').textContent = ''; refresh(); } }, true));
-const ATTRACT_AFTER = Number(params.get('attract') || 45) * 1000;
+const ATTRACT_AFTER = params.get('kiosk') || params.get('attract') ? Number(params.get('attract') || 45) * 1000 : Infinity;
 setInterval(async () => {
   if (state.playing || !state.index || Date.now() - state.lastTouch < ATTRACT_AFTER) return;
   state.attract = true;
@@ -275,15 +319,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ------------------------------------------------------------------ boot
 (async () => {
   state.index = await loadIndex();
+  fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/features.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { FEATS = j; if (j) $('#features-wrap').hidden = false; }).catch(() => {});
+  initReal();
   spine.configure(state.index.n_layers, state.index.layer);
   if (state.index.map) feelmap.setMap(state.index.map);
   buildControls();
-  state.qid = params.get('q') || null;
+  // first-time visitors: one tap on the big button gives a result
+  state.qid = params.get('q') || (state.index.questions.find((x) => x.id === 'how-was-your-day') || state.index.questions[0]).id;
   if (params.get('e')) state.emotion = params.get('e');
   if (params.get('l')) state.level = params.get('l');
   refresh();
   setPush(null);
   $('#push-badge').hidden = true;
+  stage.ready.then(() => $('.stage').classList.add('loaded')).catch(() => $('.stage').classList.add('loaded'));
   if (params.get('autoplay')) play({ fast: !!params.get('fast') });
-  window.__btm = { state, play, stage };
+  window.__btm = { state, play, stage, THREE };
 })();

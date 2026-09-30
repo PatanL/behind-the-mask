@@ -18,11 +18,12 @@ export class Stage {
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(24, 1, 0.05, 20);
-    this.lookAt = new THREE.Vector3(0, 0.0, 0.03);
+    this.lookAt = new THREE.Vector3(0, -0.012, 0.03);
     this.camera.position.set(0, 0.035, 0.98).add(new THREE.Vector3(0, 0.005, 0.03));
     this.camera.lookAt(this.lookAt);
-    this.face = new AndroidFace(this.scene, '/face/android.glb', { camera: this.camera, seed: 11, textTarget: { x: 0.9, y: -0.2 } });
-    this.lights = createFaceStage(r, this.scene, { target: this.face.root });
+    this.face = new AndroidFace(this.scene, `${import.meta.env.BASE_URL}face/android.glb`, { camera: this.camera, seed: 11, textTarget: { x: 0.9, y: -0.2 } });
+    this.lights = createFaceStage(r, this.scene, { target: this.face.root, envIntensity: 0.45 });
+    this.lights.key.intensity = 9;   // the stage defaults blow the porcelain out under our tone mapping
     // an aura behind the head that takes the colour of the push
     const auraMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -60,13 +61,19 @@ export class Stage {
     this.composer.setSize(w, h);
     this.camera.aspect = w / h;
     // keep the whole head in frame on tall and wide stages
-    const fit = w / h < 0.8 ? 1.12 : 0.98;
-    this.camera.position.set(0, 0.04, fit + 0.03);
+    // frame head and shoulders; tall (phone) stages step back a little further
+    const fit = w / h < 0.8 ? 1.02 : 0.9;
+    this.camera.position.set(0, 0.035, fit + 0.03);
     this.camera.lookAt(this.lookAt);
     this.camera.updateProjectionMatrix();
   }
 
-  setPushColor(hex, amount) { this.auraTarget.color.set(hex); this.auraTarget.amt = amount; }
+  setPushColor(hex, amount) {
+    this.auraTarget.color.set(hex); this.auraTarget.amt = amount;
+    if (this.face.uniforms) this.face.uniforms.uGlowColor.value.set(hex);
+  }
+  /** Seam glow 0..1 (driven by the measured signal while it writes). */
+  setGlow(v) { this.glowTarget = v; }
 
   render() {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
@@ -75,6 +82,7 @@ export class Stage {
     u.uColor.value.lerp(this.auraTarget.color, Math.min(1, dt * 2));
     u.uAmt.value += (this.auraTarget.amt - u.uAmt.value) * Math.min(1, dt * 1.5);
     u.uTime.value = t;
+    if (this.face.uniforms) { const g = this.face.uniforms.uGlow; g.value += ((this.glowTarget ?? 0.15) * 3.2 - g.value) * Math.min(1, dt * 3); }
     this.composer.render();
   }
 }

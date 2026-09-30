@@ -1,0 +1,14 @@
+[Unit]
+Description=Behind the Mask exhibit (static site via vite preview on the Tailscale IP)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/behind-the-mask/web
+Environment=PATH=%h/.nvm/versions/node/v22.22.0/bin:/usr/bin:/bin
+ExecStart=%h/.nvm/versions/node/v22.22.0/bin/npx vite preview --host 100.97.32.64 --port 4340 --strictPort
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

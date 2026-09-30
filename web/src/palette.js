@@ -8,6 +8,7 @@ export const EMO = {
   curiosity: { label: 'Curiosity', color: '#a6e35a' },
   none: { label: 'No push', color: '#c9cfe4' },
   swing: { label: 'Mood swing', color: '#ffffff' },
+  unmask: { label: 'Take off the mask', color: '#ff8fb1' },
 };
 export const LEVELS = [
   ['little', 'A little'],

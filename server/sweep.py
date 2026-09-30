@@ -11,9 +11,10 @@ from engine import Engine, GenConfig
 from textemo import TextEmotion
 
 ap = argparse.ArgumentParser()
-ap.add_argument('--dirs', default='runs/q06')
-ap.add_argument('--chat', default='Qwen/Qwen3-0.6B')
-ap.add_argument('--base', default='Qwen/Qwen3-0.6B-Base')
+ap.add_argument('--dirs', default='runs/q9b')
+ap.add_argument('--chat', default='Qwen/Qwen3.5-9B')
+ap.add_argument('--base', default='Qwen/Qwen3.5-9B-Base')
+ap.add_argument('--labels', default='')
 ap.add_argument('--coefs', default='0,0.1,0.2,0.3,0.45,0.6,0.8')
 ap.add_argument('--prompts', default='How was your day?|Describe the ocean at night.|What should I cook for dinner tonight?')
 ap.add_argument('--seeds', default='1,2')
@@ -29,29 +30,37 @@ prompts = a.prompts.split('|')
 seeds = [int(s) for s in a.seeds.split(',')]
 rows = []
 t0 = time.time()
-for e in EMOTIONS:
-    for c in coefs:
-        eff, flu, flu_b, eff_b, samples = [], [], [], [], []
+import re as _re
+AI_RE = _re.compile(r"\b(as an ai|an ai|language model|assistant|i don't have (feelings|emotions|a day|days|personal))", _re.I)
+labels = a.labels.split(',') if a.labels else chat.labels
+for e in labels:
+    for c in ([-x for x in coefs] if e == 'assistant' else coefs):
+        eff, flu, flu_b, eff_b, samples, inner, ai = [], [], [], [], [], [], []
         for p in prompts:
             for sd in seeds:
                 lp = {'steered': [], 'base_steered': []}
+                zs = []
                 def emit(ev):
                     if ev['type'] == 'tokens':
                         for it in ev['items']:
+                            if it['stream'] == 'steered' and 'emo' in it:
+                                zs.append(it['emo'][e])
                             if it['stream'] in lp and it['text']:
                                 # probability of the chosen token under the unsteered model = cf row for chat;
                                 # for base we only have the steered prob; use it as a weaker proxy
                                 lp[it['stream']].append(math.log(max(it['p'], 1e-9)))
                 texts = eng.run(p, {e: c}, emit, seed=sd)
                 s = te.score(texts['steered']); sb = te.score(texts['base_steered'])
+                inner.append(statistics.mean(zs) if zs else 0.0)
+                ai.append(1.0 if AI_RE.search(texts['steered']) else 0.0)
                 eff.append(s.get(e, 0.0)); eff_b.append(sb.get(e, 0.0))
                 flu.append(statistics.mean(lp['steered']) if lp['steered'] else -9)
                 flu_b.append(statistics.mean(lp['base_steered']) if lp['base_steered'] else -9)
                 if sd == seeds[0]:
                     samples.append({'prompt': p, 'chat': texts['steered'][:220], 'base': texts['base_steered'][:220]})
-        r = {'emotion': e, 'coef': c, 'effect': round(statistics.mean(eff), 3), 'effect_base': round(statistics.mean(eff_b), 3),
+        r = {'emotion': e, 'coef': c, 'inner_z': round(statistics.mean(inner), 2), 'ai_talk': round(statistics.mean(ai), 2), 'effect': round(statistics.mean(eff), 3), 'effect_base': round(statistics.mean(eff_b), 3),
              'logp': round(statistics.mean(flu), 3), 'logp_base': round(statistics.mean(flu_b), 3), 'samples': samples}
         rows.append(r)
-        print(f"{e:9s} c={c:4.2f} effect chat {r['effect']:.2f} base {r['effect_base']:.2f} | logp chat {r['logp']:6.2f} base {r['logp_base']:6.2f} | {samples[0]['chat'][:90]!r}", flush=True)
+        print(f"{e:9s} c={c:5.2f} inner z {r['inner_z']:5.2f} ai-talk {r['ai_talk']:.2f} effect chat {r['effect']:.2f} base {r['effect_base']:.2f} | logp chat {r['logp']:6.2f} base {r['logp_base']:6.2f} | {samples[0]['chat'][:90]!r}", flush=True)
 (D / 'sweep.json').write_text(json.dumps(rows, indent=1))
 print(f'sweep done in {time.time() - t0:.0f}s')

@@ -39,6 +39,8 @@ class GLB:
 
     def accessor(self, arr, target=ARRAY_BUFFER, normalized=False, minmax=False):
         arr = np.ascontiguousarray(arr)
+        if target == ELEMENT_ARRAY_BUFFER:
+            arr = arr.ravel()  # index buffers are flat SCALAR lists (count = number of indices, not triangles)
         n = arr.shape[0]
         comps = 1 if arr.ndim == 1 else arr.shape[1]
         ct = CT[arr.dtype.type]

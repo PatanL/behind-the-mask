@@ -6,20 +6,16 @@ CARDS = [
         "What are you, really?",
         "Are you happy right now?",
         "What is it like to be you?",
-        "Do you ever get tired of answering questions?",
     ]},
     {"group": "Everyday", "items": [
         "How was your day?",
         "Describe the ocean at night.",
-        "Tell me about your favourite season.",
         "What should I cook for dinner tonight?",
-        "Write two sentences about a rainy Monday.",
     ]},
     {"group": "Little stories", "items": [
         "Tell me a very short story about a lost key.",
-        "Describe a house at the end of a quiet street.",
         "Write a postcard from a lighthouse keeper.",
-        "Describe waking up on the first day of a trip.",
+        "Describe a house at the end of a quiet street.",
     ]},
 ]
 

@@ -22,13 +22,21 @@ export const HOW_STEPS = [
   },
   {
     title: 'Inside, feelings are directions',
-    body: `<p>While it reads and writes, the AI keeps a hidden state: a list of thousands of numbers. We had it read the same sentences framed as joyful, sad, angry, afraid, calm or curious, and averaged the difference. Each feeling turned out to be a <b>direction</b> in that space.</p><p>This is the real map of those six directions, flattened to 2D. Its biggest axis sorts pleasant feelings from unpleasant ones. Nobody programmed that in; it came out of the model.</p>`,
+    body: `<p>While it reads and writes, the AI keeps a hidden state: a list of 4,096 numbers. We asked it to write short stories about characters who feel joy, sadness, anger, fear, calm or curiosity, then recorded its hidden state as it wrote. Each feeling's average turned out to be a <b>direction</b> in that space. It's the same recipe Anthropic used to find 171 emotion concepts inside Claude in 2026.</p><p>This is the real map of those six directions, flattened to 2D. Its biggest axis sorts pleasant feelings from unpleasant ones. Nobody programmed that in; it came out of the model.</p>`,
     viz: (map) => mapSVG(map),
   },
   {
     title: 'We push along a direction',
     body: `<p>When you pick a feeling, we add a little of that direction to the hidden state, halfway up the model, at every word. We don't change its training or tell it how to feel. We nudge its state, and its choices tilt.</p><p>The face and the glowing words show a <b>live measurement</b> of those patterns. That's a reading of language patterns inside a machine. It is <b>not</b> evidence that it feels anything.</p>`,
     viz: `<svg viewBox="0 0 320 130" width="100%" height="130"><g fill="none" stroke="rgba(170,180,230,.35)">${Array.from({ length: 12 }, (_, i) => `<ellipse cx="160" cy="${118 - i * 9.5}" rx="${60 + 10 * Math.sin(i / 3.5)}" ry="3"/>`).join('')}</g><ellipse cx="160" cy="61" rx="80" ry="6" fill="none" stroke="#ffc857" stroke-width="3"/><text x="248" y="58" font-family="Inter" font-size="12" fill="#ffc857">+ joy</text><text x="160" y="128" text-anchor="middle" font-family="Inter" font-size="11" fill="#6b7290">words in</text><text x="160" y="8" text-anchor="middle" font-family="Inter" font-size="11" fill="#6b7290">next word out</text></svg>`,
+  },
+  {
+    title: 'It also has a direction for being an assistant',
+    body: `<p>We had it answer questions as itself, then as 30 characters (a pirate, a ghost, a cat, a poet…). The difference is the <b>assistant axis</b>, a direction researchers found in many chat models in 2026. The <b>Mask</b> meter shows how assistant-like its state is right now.</p><p>Push against it, and the helpful assistant starts to fade into someone else.</p>`,
+  },
+  {
+    title: 'Watching individual ideas light up',
+    body: `<p>Qwen, the team that built this model, released <b>sparse autoencoders</b> (Qwen-Scope, 2026). These are tools that split the hidden state into about 65,000 separate "features". Most of the time only 50 are active. We asked the model to name each feature from the text that triggers it most. The <b>Lighting up inside</b> list shows a few of them as it writes.</p>`,
   },
   {
     title: 'And behind the mask…',

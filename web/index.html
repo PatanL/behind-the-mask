@@ -20,6 +20,7 @@
     <main class="stage-wrap">
       <section class="stage" aria-label="The android">
         <canvas id="face-canvas"></canvas>
+        <div class="stage-loading">Waking the android…</div>
         <div class="stage-caption" id="caption" aria-live="polite"></div>
         <div class="push-badge" id="push-badge" hidden></div>
       </section>
@@ -33,7 +34,9 @@
       <aside class="inside" aria-label="Inside the AI">
         <div class="inside-title">Inside the AI</div>
         <svg id="spine" viewBox="0 0 120 420" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="mask-meter" id="mask-meter" hidden title="How much its hidden state looks like its own assistant voice (100%) versus a role-played character (0%)."><span>Mask</span><div class="bar"><i></i></div><b>–</b></div>
         <div class="meters" id="meters"></div>
+        <div id="features-wrap" hidden><div class="map-h">Lighting up inside</div><div class="features" id="features"></div></div>
         <div class="map-h">Its feeling map</div>
         <canvas id="feelmap" class="feelmap"></canvas>
         <div class="inside-note">Live readout of patterns in its hidden state. A measurement of language patterns, not feelings.</div>
@@ -86,18 +89,32 @@
 
 
 
+    <section class="real" id="real" hidden>
+      <h2>Is the reading real?</h2>
+      <p>No steering here. We just change one thing in a sentence and watch the model's own feeling signals. If the directions mean something, the signal should follow the story.</p>
+      <div class="chips real-pick"></div>
+      <div class="real-sentence"></div>
+      <input type="range" min="0" max="5" value="0" step="1" aria-label="Change the sentence" />
+      <div class="real-chart"></div>
+      <div class="real-note"></div>
+    </section>
+
     <footer class="foot" id="research">
       <div class="foot-h">The research behind this</div>
       <ul class="refs">
+        <li><a href="https://transformer-circuits.pub/2026/emotions/index.html" target="_blank" rel="noopener">Emotion concepts and their function in a large language model</a> <span>Anthropic, 2026</span></li>
+        <li><a href="https://arxiv.org/abs/2601.10387" target="_blank" rel="noopener">The Assistant Axis</a> <span>Lu et al., 2026</span></li>
+        <li><a href="https://arxiv.org/abs/2605.11887" target="_blank" rel="noopener">Qwen-Scope: sparse features as development tools</a> <span>Deng et al., 2026</span></li>
+        <li><a href="https://arxiv.org/abs/2604.04064" target="_blank" rel="noopener">Extracting and Steering Emotion Representations in Small LMs</a> <span>Jeong, 2026</span></li>
+        <li><a href="https://arxiv.org/abs/2510.22042" target="_blank" rel="noopener">Emotions Where Art Thou (the emotional latent space of LLMs)</a> <span>Reichman et al., ICLR 2026</span></li>
         <li><a href="https://arxiv.org/abs/2308.10248" target="_blank" rel="noopener">Steering Language Models With Activation Engineering</a> <span>Turner et al., 2023</span></li>
         <li><a href="https://arxiv.org/abs/2312.06681" target="_blank" rel="noopener">Steering Llama 2 via Contrastive Activation Addition</a> <span>Panickssery et al., 2023</span></li>
-        <li><a href="https://arxiv.org/abs/2310.01405" target="_blank" rel="noopener">Representation Engineering</a> <span>Zou et al., 2023</span></li>
         <li><a href="https://arxiv.org/abs/2507.21509" target="_blank" rel="noopener">Persona Vectors</a> <span>Chen et al., 2025</span></li>
+        <li><a href="https://arxiv.org/abs/2410.13928" target="_blank" rel="noopener">Automatically Interpreting Millions of Features in LLMs</a> <span>Paulo et al., 2024</span></li>
         <li><a href="https://arxiv.org/abs/2203.02155" target="_blank" rel="noopener">Training language models to follow instructions with human feedback</a> <span>Ouyang et al., 2022</span></li>
         <li><a href="https://arxiv.org/abs/2409.17027" target="_blank" rel="noopener">Counterfactual Token Generation in LLMs</a> <span>Chatzi et al., 2024</span></li>
-        <li><a href="https://arxiv.org/abs/2505.09388" target="_blank" rel="noopener">Qwen3 Technical Report</a> <span>Yang et al., 2025</span></li>
       </ul>
-      <div class="foot-note">Models: Qwen3-4B-Instruct-2507 and Qwen3-4B-Base (Apache-2.0). Face: ICT-FaceKit (MIT). The face and colours visualise measured activation patterns, not feelings.</div>
+      <div class="foot-note">Models: Qwen3.5-9B and Qwen3.5-9B-Base (Apache-2.0), with Qwen-Scope sparse autoencoders. Face: ICT-FaceKit (MIT). The face and colours visualise measured activation patterns, not feelings.</div>
     </footer>
 
     <div class="inspect" id="inspect" hidden role="dialog" aria-label="Word choice">

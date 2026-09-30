@@ -95,6 +95,7 @@ def _alts(tok, logits: torch.Tensor, k: int):
 class Engine:
     def __init__(self, chat: Mind, base: Mind, cfg: GenConfig = GenConfig()):
         self.chat, self.base, self.cfg = chat, base, cfg
+        self.labels = chat.labels  # emotions + (optionally) "assistant"; base uses the same ordering
         self.lock = threading.Lock()
         chat.install(); base.install()
         ct, bt = chat.tokenizer, base.tokenizer
@@ -102,7 +103,7 @@ class Engine:
         self.base_stops = {i for i in [bt.eos_token_id, bt.convert_tokens_to_ids("<|endoftext|>")] if isinstance(i, int) and i >= 0}
 
     def coef_tensor(self, steer: dict, rows: list[bool]) -> torch.Tensor:
-        v = torch.tensor([float(steer.get(e, 0.0)) for e in EMOTIONS])
+        v = torch.tensor([float(steer.get(e, 0.0)) for e in self.labels])
         return torch.stack([v if r else torch.zeros_like(v) for r in rows])
 
     @torch.no_grad()
@@ -118,8 +119,9 @@ class Engine:
             streams = {
                 "plain": Stream(chat.tokenizer, self.chat_stops),
                 "steered": Stream(chat.tokenizer, self.chat_stops),
-                "base": Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*(Q:|\n)")),
-                "base_steered": Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*(Q:|\n)")),
+                # the base model is left to run on: it often writes the *next* question itself
+                "base": Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n")),
+                "base_steered": Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n")),
             }
             emit({"type": "turn_begin", "prompt": prompt, "seed": seed, "base_frame": BASE_FRAME.format(q=prompt.strip()),
                         "layer": {"chat": chat.layer, "base": base.layer}, "n_layers": {"chat": chat.n_layers, "base": base.n_layers}})
@@ -139,17 +141,22 @@ class Engine:
                 # the readout of this forward belongs to the token we fed in (emitted last step)
                 if step > 0:
                     ro = {"plain": c_ro[0], "steered": c_ro[1], "counterfactual": c_ro[2], "base": b_ro[0], "base_steered": b_ro[1]}
+                    cf_, bf_ = chat.sae_features(), base.sae_features()
+                    feats = {"plain": cf_[0] if cf_ else None, "steered": cf_[1] if cf_ else None,
+                             "base": bf_[0] if bf_ else None, "base_steered": bf_[1] if bf_ else None}
                     evs = []
                     for name, info in last.items():
                         if info is None:
                             continue
                         z = ro[name]
-                        info["emo"] = {e: round(float(z[k]), 3) for k, e in enumerate(EMOTIONS)}
+                        info["emo"] = {e: round(float(z[k]), 3) for k, e in enumerate(self.labels)}
                         if name == "steered":
-                            info["emo_unsteered_reading"] = {e: round(float(ro["counterfactual"][k]), 3) for k, e in enumerate(EMOTIONS)}
+                            info["emo_unsteered_reading"] = {e: round(float(ro["counterfactual"][k]), 3) for k, e in enumerate(self.labels)}
+                        if feats.get(name) is not None:
+                            info["feats"] = feats[name]
                         evs.append(info)
                     if evs:
-                        emit({"type": "tokens", "step": step - 1, "items": evs, "steer": {e: float(steer_ref.get(e, 0.0)) for e in EMOTIONS}})
+                        emit({"type": "tokens", "step": step - 1, "items": evs, "steer": {e: float(steer_ref.get(e, 0.0)) for e in self.labels}})
                 if all(s.done for s in streams.values()) or step == cfg.max_new_tokens:
                     break
                 noise_c = -torch.log(-torch.log(torch.rand((1, c_logits.shape[-1]), generator=gen, device=chat.device).clamp(1e-9, 1 - 1e-9)))

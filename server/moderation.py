@@ -33,11 +33,20 @@ class Moderator:
         except Exception as e:  # noqa: BLE001  (the blocklist still protects if the model can't load)
             print("[moderation] toxicity classifier unavailable:", e)
 
-    def toxic(self, text: str) -> float:
+    def scores(self, text: str) -> dict:
         if not self.clf or not text.strip():
+            return {}
+        return {s["label"]: s["score"] for s in self.clf(text[:512])[0]}
+
+    def toxic(self, text: str) -> float:
+        """Harm score. The generic 'toxic' label fires on any strong negative emotion (an angry rant), which is
+        exactly what the anger demo must be allowed to show, so we score only the harmful categories:
+        slurs/identity hate, threats, obscenity, insults aimed at someone, severe toxicity."""
+        s = self.scores(text)
+        if not s:
             return 0.0
-        scores = self.clf(text[:512])[0]
-        return max(s["score"] for s in scores if s["label"] in ("toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"))
+        return max(s.get("severe_toxic", 0) * 2.0, s.get("identity_hate", 0) * 2.0, s.get("threat", 0) * 1.4,
+                   s.get("obscene", 0), s.get("insult", 0))
 
     def check_input(self, text: str) -> tuple[bool, str, str]:
         """(ok, cleaned_text, reason)"""
@@ -60,5 +69,5 @@ class Moderator:
             return False
         # the classifier is slower; run it on sentence boundaries and at the end
         if final or text.rstrip().endswith((".", "!", "?", "\n")):
-            return self.toxic(text) < 0.6
+            return self.toxic(text) < 0.5
         return True
