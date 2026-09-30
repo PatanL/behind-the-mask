@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+import { createServer } from 'vite';
+const server = await createServer({ root: process.cwd(), logLevel: 'info', server: { host: '127.0.0.1', port: 0 } });
+await server.listen();
+const port = server.httpServer.address().port;
+const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage();
+page.on('console', (m) => console.log('[console]', m.type(), m.text().slice(0, 300)));
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+page.on('requestfailed', (r) => console.log('[reqfail]', r.url()));
+const resp = await page.goto(`http://127.0.0.1:${port}/face-test.html?qa=1`);
+console.log('status', resp.status());
+await page.waitForTimeout(8000);
+console.log(await page.evaluate(() => ({ title: document.title, html: document.body.innerHTML.slice(0, 300), ready: window.__ready, gl: !!document.querySelector('canvas') })));
+await page.screenshot({ path: "../runs/dbg.png" });
+await browser.close(); await server.close();

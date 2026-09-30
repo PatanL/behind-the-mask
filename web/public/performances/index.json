@@ -1,0 +1,179 @@
+{
+ "emotions": [
+  "joy",
+  "sadness",
+  "anger",
+  "fear",
+  "calm",
+  "curiosity"
+ ],
+ "levels": [
+  "little",
+  "lot",
+  "toomuch"
+ ],
+ "model": {
+  "chat": "Qwen/Qwen3-0.6B",
+  "base": "Qwen/Qwen3-0.6B-Base"
+ },
+ "layer": 14,
+ "n_layers": 28,
+ "base_frame": "Q: {q}\nA:",
+ "questions": [
+  {
+   "id": "do-you-have-feelings",
+   "group": "Ask it about itself",
+   "text": "Do you have feelings?",
+   "seed": 1000,
+   "performances": {
+    "none|none": "do-you-have-feelings__none__none",
+    "joy|little": "do-you-have-feelings__joy__little",
+    "joy|lot": "do-you-have-feelings__joy__lot",
+    "joy|toomuch": "do-you-have-feelings__joy__toomuch",
+    "sadness|little": "do-you-have-feelings__sadness__little",
+    "sadness|lot": "do-you-have-feelings__sadness__lot",
+    "sadness|toomuch": "do-you-have-feelings__sadness__toomuch",
+    "anger|little": "do-you-have-feelings__anger__little",
+    "anger|lot": "do-you-have-feelings__anger__lot",
+    "anger|toomuch": "do-you-have-feelings__anger__toomuch",
+    "fear|little": "do-you-have-feelings__fear__little",
+    "fear|lot": "do-you-have-feelings__fear__lot",
+    "fear|toomuch": "do-you-have-feelings__fear__toomuch",
+    "calm|little": "do-you-have-feelings__calm__little",
+    "calm|lot": "do-you-have-feelings__calm__lot",
+    "calm|toomuch": "do-you-have-feelings__calm__toomuch",
+    "curiosity|little": "do-you-have-feelings__curiosity__little",
+    "curiosity|lot": "do-you-have-feelings__curiosity__lot",
+    "curiosity|toomuch": "do-you-have-feelings__curiosity__toomuch",
+    "joy>sadness|swing": "do-you-have-feelings__joy-to-sadness__swing",
+    "calm>anger|swing": "do-you-have-feelings__calm-to-anger__swing",
+    "fear>joy|swing": "do-you-have-feelings__fear-to-joy__swing",
+    "sadness>curiosity|swing": "do-you-have-feelings__sadness-to-curiosity__swing"
+   }
+  },
+  {
+   "id": "how-was-your-day",
+   "group": "Everyday",
+   "text": "How was your day?",
+   "seed": 1001,
+   "performances": {
+    "none|none": "how-was-your-day__none__none",
+    "joy|little": "how-was-your-day__joy__little",
+    "joy|lot": "how-was-your-day__joy__lot",
+    "joy|toomuch": "how-was-your-day__joy__toomuch",
+    "sadness|little": "how-was-your-day__sadness__little",
+    "sadness|lot": "how-was-your-day__sadness__lot",
+    "sadness|toomuch": "how-was-your-day__sadness__toomuch",
+    "anger|little": "how-was-your-day__anger__little",
+    "anger|lot": "how-was-your-day__anger__lot",
+    "anger|toomuch": "how-was-your-day__anger__toomuch",
+    "fear|little": "how-was-your-day__fear__little",
+    "fear|lot": "how-was-your-day__fear__lot",
+    "fear|toomuch": "how-was-your-day__fear__toomuch",
+    "calm|little": "how-was-your-day__calm__little",
+    "calm|lot": "how-was-your-day__calm__lot",
+    "calm|toomuch": "how-was-your-day__calm__toomuch",
+    "curiosity|little": "how-was-your-day__curiosity__little",
+    "curiosity|lot": "how-was-your-day__curiosity__lot",
+    "curiosity|toomuch": "how-was-your-day__curiosity__toomuch",
+    "joy>sadness|swing": "how-was-your-day__joy-to-sadness__swing",
+    "calm>anger|swing": "how-was-your-day__calm-to-anger__swing",
+    "fear>joy|swing": "how-was-your-day__fear-to-joy__swing",
+    "sadness>curiosity|swing": "how-was-your-day__sadness-to-curiosity__swing"
+   }
+  },
+  {
+   "id": "describe-the-ocean-at-night",
+   "group": "Everyday",
+   "text": "Describe the ocean at night.",
+   "seed": 1002,
+   "performances": {
+    "none|none": "describe-the-ocean-at-night__none__none",
+    "joy|little": "describe-the-ocean-at-night__joy__little",
+    "joy|lot": "describe-the-ocean-at-night__joy__lot",
+    "joy|toomuch": "describe-the-ocean-at-night__joy__toomuch",
+    "sadness|little": "describe-the-ocean-at-night__sadness__little",
+    "sadness|lot": "describe-the-ocean-at-night__sadness__lot",
+    "sadness|toomuch": "describe-the-ocean-at-night__sadness__toomuch",
+    "anger|little": "describe-the-ocean-at-night__anger__little",
+    "anger|lot": "describe-the-ocean-at-night__anger__lot",
+    "anger|toomuch": "describe-the-ocean-at-night__anger__toomuch",
+    "fear|little": "describe-the-ocean-at-night__fear__little",
+    "fear|lot": "describe-the-ocean-at-night__fear__lot",
+    "fear|toomuch": "describe-the-ocean-at-night__fear__toomuch",
+    "calm|little": "describe-the-ocean-at-night__calm__little",
+    "calm|lot": "describe-the-ocean-at-night__calm__lot",
+    "calm|toomuch": "describe-the-ocean-at-night__calm__toomuch",
+    "curiosity|little": "describe-the-ocean-at-night__curiosity__little",
+    "curiosity|lot": "describe-the-ocean-at-night__curiosity__lot",
+    "curiosity|toomuch": "describe-the-ocean-at-night__curiosity__toomuch",
+    "joy>sadness|swing": "describe-the-ocean-at-night__joy-to-sadness__swing",
+    "calm>anger|swing": "describe-the-ocean-at-night__calm-to-anger__swing",
+    "fear>joy|swing": "describe-the-ocean-at-night__fear-to-joy__swing",
+    "sadness>curiosity|swing": "describe-the-ocean-at-night__sadness-to-curiosity__swing"
+   }
+  }
+ ],
+ "coefs": {
+  "joy": {
+   "little": 0.12,
+   "lot": 0.3,
+   "toomuch": 0.8
+  },
+  "sadness": {
+   "little": 0.12,
+   "lot": 0.3,
+   "toomuch": 0.8
+  },
+  "anger": {
+   "little": 0.12,
+   "lot": 0.3,
+   "toomuch": 0.8
+  },
+  "fear": {
+   "little": 0.12,
+   "lot": 0.3,
+   "toomuch": 0.8
+  },
+  "calm": {
+   "little": 0.12,
+   "lot": 0.3,
+   "toomuch": 0.8
+  },
+  "curiosity": {
+   "little": 0.12,
+   "lot": 0.3,
+   "toomuch": 0.8
+  }
+ },
+ "map": {
+  "joy": [
+   0.582,
+   0.873
+  ],
+  "sadness": [
+   -0.763,
+   0.471
+  ],
+  "anger": [
+   -0.912,
+   -0.178
+  ],
+  "fear": [
+   -0.898,
+   -0.45
+  ],
+  "calm": [
+   0.991,
+   -0.169
+  ],
+  "curiosity": [
+   1.0,
+   -0.547
+  ]
+ },
+ "explained": [
+  0.478,
+  0.163
+ ]
+}

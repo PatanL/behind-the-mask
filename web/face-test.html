@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BEHIND THE MASK · face test</title>
+  <style>
+    :root { --bg0: #03050a; --bg1: #0a1020; --ink: #cfd8e6; --dim: #6c7a90; --acc: #7fe7ff; --warm: #ffb07a; }
+    html, body { margin: 0; height: 100%; background: var(--bg0); color: var(--ink); font: 12px/1.35 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+    #stage { position: fixed; inset: 0; background: radial-gradient(120% 90% at 50% 38%, #0d1628 0%, #070b16 45%, var(--bg0) 80%); }
+    canvas { display: block; }
+    #panel { position: fixed; top: 12px; right: 12px; width: 250px; max-height: calc(100% - 24px); overflow: auto; padding: 12px 14px; background: rgba(8, 12, 22, 0.78); border: 1px solid rgba(127, 231, 255, 0.12); border-radius: 10px; backdrop-filter: blur(6px); }
+    #panel h1 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.22em; font-weight: 600; color: var(--dim); }
+    .row { display: grid; grid-template-columns: 70px 1fr 34px; align-items: center; gap: 8px; margin: 5px 0; }
+    .row label { color: var(--ink); }
+    .row output { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+    input[type=range] { width: 100%; accent-color: var(--acc); }
+    .sep { height: 1px; background: rgba(255, 255, 255, 0.07); margin: 10px 0; }
+    button { font: inherit; color: var(--ink); background: rgba(127, 231, 255, 0.07); border: 1px solid rgba(127, 231, 255, 0.22); border-radius: 6px; padding: 5px 9px; cursor: pointer; margin: 2px 2px 2px 0; }
+    button:hover { background: rgba(127, 231, 255, 0.16); }
+    button.on { background: rgba(127, 231, 255, 0.28); }
+    #status { margin-top: 8px; color: var(--dim); min-height: 1.4em; }
+    body.qa #panel { display: none; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="panel">
+    <h1>BEHIND THE MASK · FACE</h1>
+    <div id="sliders"></div>
+    <div class="sep"></div>
+    <div class="row"><label for="intensity">intensity</label><input id="intensity" type="range" min="0" max="1" step="0.01" value="1" /><output>1.00</output></div>
+    <div class="row"><label for="iris">iris</label><input id="iris" type="color" value="#7fe7ff" /><output></output></div>
+    <div class="row"><label for="writing">writing</label><input id="writing" type="checkbox" /><output></output></div>
+    <div class="row"><label for="gaze">gaze</label><select id="gaze"><option value="camera">camera</option><option value="mouse">mouse</option><option value="text">text (down)</option></select><output></output></div>
+    <div class="sep"></div>
+    <div>
+      <button id="demo">▶ scripted demo</button>
+      <button id="reset">neutral</button>
+    </div>
+    <div id="presets"></div>
+    <div id="status"></div>
+  </div>
+  <script type="module" src="/src/face-test.js"></script>
+</body>
+</html>

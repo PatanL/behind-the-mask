@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Behind the Mask — steer an AI's feelings</title>
+  <meta name="description" content="An interactive exhibit: push an AI toward joy, sadness, fear… by editing its hidden state, and see what's behind its assistant persona." />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <div class="brand"><span class="brand-mark"></span>Behind the Mask</div>
+      <nav class="top-nav">
+        <button class="link" id="open-how">How does this work?</button>
+        <a class="link" href="https://github.com/" id="repo-link" target="_blank" rel="noopener">Research &amp; code</a>
+      </nav>
+    </header>
+
+    <main class="stage-wrap">
+      <section class="stage" aria-label="The android">
+        <canvas id="face-canvas"></canvas>
+        <div class="stage-caption" id="caption" aria-live="polite"></div>
+        <div class="push-badge" id="push-badge" hidden></div>
+      </section>
+
+      <section class="speech-wrap">
+        <div class="speech-label" id="speech-label">It will answer here.</div>
+        <div class="speech" id="speech" aria-live="polite"></div>
+        <div class="speech-hint" id="speech-hint" hidden>Glowing words are where the push changed its choice. Tap any word to see what it was deciding between.</div>
+      </section>
+
+      <aside class="inside" aria-label="Inside the AI">
+        <div class="inside-title">Inside the AI</div>
+        <svg id="spine" viewBox="0 0 120 420" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="meters" id="meters"></div>
+        <div class="map-h">Its feeling map</div>
+        <canvas id="feelmap" class="feelmap"></canvas>
+        <div class="inside-note">Live readout of patterns in its hidden state. A measurement of language patterns, not feelings.</div>
+      </aside>
+    </main>
+
+    <section class="reveals" id="reveals" hidden>
+      <div class="reveal-intro">What just happened?</div>
+      <div class="cards">
+        <article class="card" id="card-plain">
+          <h3>Without the push</h3>
+          <p class="card-sub">Same AI, same question, same random dice. The only difference is the push.</p>
+          <div class="card-text" id="plain-text"></div>
+          <div class="card-foot" id="plain-foot"></div>
+        </article>
+        <article class="card card-mask" id="card-base">
+          <h3>Behind the mask</h3>
+          <p class="card-sub">The same kind of AI <em>before</em> it was trained to be a helpful assistant. It only continues text. It has no persona.</p>
+          <div class="frame" id="base-frame"></div>
+          <div class="card-text" id="base-text"></div>
+          <label class="toggle"><input type="checkbox" id="base-push" /> <span>Push the base model too</span></label>
+          <div class="card-foot">That friendly assistant voice is trained in, largely with RLHF (reinforcement learning from human feedback).</div>
+        </article>
+        <article class="card" id="card-decisions">
+          <h3>Its decisions</h3>
+          <p class="card-sub">An AI writes one word-piece at a time, weighing thousands of options. The push tilts those odds.</p>
+          <div class="decision-stat" id="decision-stat"></div>
+          <div class="decision-bars" id="decision-bars"></div>
+          <div class="card-foot">Tap any word in the answer to inspect that choice.</div>
+        </article>
+      </div>
+      <button class="again" id="again">Try another</button>
+    </section>
+
+    <section class="deck" id="deck">
+      <div class="step step-q">
+        <div class="step-title"><span class="n">1</span> Pick something to ask</div>
+        <div class="chips" id="questions"></div>
+      </div>
+      <div class="step step-f">
+        <div class="step-title"><span class="n">2</span> Push it toward a feeling</div>
+        <div class="orbs" id="feelings"></div>
+        <div class="amount" id="amount" role="radiogroup" aria-label="How hard to push"></div>
+      </div>
+      <div class="step step-go">
+        <button class="go" id="go" disabled><span>Let it speak</span></button>
+        <div class="go-note" id="go-note">Choose a question first.</div>
+      </div>
+    </section>
+
+
+
+    <footer class="foot" id="research">
+      <div class="foot-h">The research behind this</div>
+      <ul class="refs">
+        <li><a href="https://arxiv.org/abs/2308.10248" target="_blank" rel="noopener">Steering Language Models With Activation Engineering</a> <span>Turner et al., 2023</span></li>
+        <li><a href="https://arxiv.org/abs/2312.06681" target="_blank" rel="noopener">Steering Llama 2 via Contrastive Activation Addition</a> <span>Panickssery et al., 2023</span></li>
+        <li><a href="https://arxiv.org/abs/2310.01405" target="_blank" rel="noopener">Representation Engineering</a> <span>Zou et al., 2023</span></li>
+        <li><a href="https://arxiv.org/abs/2507.21509" target="_blank" rel="noopener">Persona Vectors</a> <span>Chen et al., 2025</span></li>
+        <li><a href="https://arxiv.org/abs/2203.02155" target="_blank" rel="noopener">Training language models to follow instructions with human feedback</a> <span>Ouyang et al., 2022</span></li>
+        <li><a href="https://arxiv.org/abs/2409.17027" target="_blank" rel="noopener">Counterfactual Token Generation in LLMs</a> <span>Chatzi et al., 2024</span></li>
+        <li><a href="https://arxiv.org/abs/2505.09388" target="_blank" rel="noopener">Qwen3 Technical Report</a> <span>Yang et al., 2025</span></li>
+      </ul>
+      <div class="foot-note">Models: Qwen3-4B-Instruct-2507 and Qwen3-4B-Base (Apache-2.0). Face: ICT-FaceKit (MIT). The face and colours visualise measured activation patterns, not feelings.</div>
+    </footer>
+
+    <div class="inspect" id="inspect" hidden role="dialog" aria-label="Word choice">
+      <button class="x" id="inspect-x" aria-label="Close">×</button>
+      <div class="inspect-title">Choosing the next word</div>
+      <div class="inspect-context" id="inspect-context"></div>
+      <div class="inspect-cols">
+        <div><div class="col-h">With the push</div><div class="bars" id="bars-steered"></div></div>
+        <div><div class="col-h muted">Without the push</div><div class="bars" id="bars-plain"></div></div>
+      </div>
+      <div class="inspect-foot" id="inspect-foot"></div>
+    </div>
+
+    <div class="how" id="how" hidden role="dialog" aria-label="How it works">
+      <div class="how-card">
+        <button class="x" id="how-x" aria-label="Close">×</button>
+        <div class="how-steps" id="how-steps"></div>
+        <div class="how-nav"><button id="how-prev" class="link">Back</button><div class="dots" id="how-dots"></div><button id="how-next" class="pill">Next</button></div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
