@@ -18,6 +18,13 @@
     </header>
 
     <main class="stage-wrap">
+      <aside class="inside inside-l" aria-label="Inside the AI">
+        <div class="inside-title">Inside the AI</div>
+        <svg id="spine" viewBox="0 0 120 420" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="mask-meter" id="mask-meter" hidden title="How much its hidden state looks like its own assistant voice (100%) versus a role-played character (0%)."><span>Mask</span><div class="bar"><i></i></div><b>–</b></div>
+        <div class="meters" id="meters"></div>
+      </aside>
+
       <section class="stage" aria-label="The android">
         <canvas id="face-canvas"></canvas>
         <div class="stage-loading">Waking the android…</div>
@@ -25,6 +32,13 @@
         <div class="push-badge" id="push-badge" hidden></div>
         <div class="mini" id="mini" hidden><span class="mini-l">Mask</span><span class="mini-bar"><i id="mini-mask"></i></span><span class="mini-l" id="mini-emo-l">Joy</span><span class="mini-bar"><i id="mini-emo"></i></span></div>
       </section>
+
+      <aside class="inside inside-r" aria-label="What lights up inside">
+        <div id="features-wrap" hidden><div class="map-h">Lighting up inside</div><div class="features" id="features"></div></div>
+        <div class="map-h">Its feeling map</div>
+        <canvas id="feelmap" class="feelmap"></canvas>
+        <div class="inside-note">Live readout of patterns in its hidden state. A measurement of language patterns, not feelings.</div>
+      </aside>
 
       <section class="speech-wrap">
         <div class="hero" id="hero">
@@ -52,17 +66,6 @@
         </div>
         <div class="speech-hint" id="speech-hint" hidden>Colour shows how strongly the feeling registers inside it. <u>Underlined</u> words are where the push flipped its choice. Tap any word to see what it was deciding between.</div>
       </section>
-
-      <aside class="inside" aria-label="Inside the AI">
-        <div class="inside-title">Inside the AI</div>
-        <svg id="spine" viewBox="0 0 120 420" preserveAspectRatio="xMidYMid meet"></svg>
-        <div class="mask-meter" id="mask-meter" hidden title="How much its hidden state looks like its own assistant voice (100%) versus a role-played character (0%)."><span>Mask</span><div class="bar"><i></i></div><b>–</b></div>
-        <div class="meters" id="meters"></div>
-        <div id="features-wrap" hidden><div class="map-h">Lighting up inside</div><div class="features" id="features"></div></div>
-        <div class="map-h">Its feeling map</div>
-        <canvas id="feelmap" class="feelmap"></canvas>
-        <div class="inside-note">Live readout of patterns in its hidden state. A measurement of language patterns, not feelings.</div>
-      </aside>
     </main>
 
     <section class="reveals" id="reveals" hidden>

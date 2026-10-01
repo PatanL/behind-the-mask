@@ -128,5 +128,5 @@ which feeling was pushed and how hard (`web/scripts/fit-decoder.mjs`). With no p
   meters still show the raw readout.
 - The polite mask and the leaks are a scripted performance, driven by the Mask meter. They show the idea of
   a trained persona covering what is underneath. They are not evidence that the model hides real feelings.
-- Some strong pushes (mostly anger) make the model abusive. Those answers are withheld: their words are
-  blacked out, but their measured readout still plays on the colours and the face.
+- Output is not filtered. Strong pushes (mostly anger) can make the model abusive; that is part of what
+  steering does. Answers withheld by an earlier filtered build show blacked-out words until regenerated.

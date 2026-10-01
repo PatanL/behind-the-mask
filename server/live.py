@@ -7,9 +7,9 @@ to the model's hidden state at every word is the mix of everyone's recent taps. 
 Alongside the steered story the engine writes, in lock-step and with the same random dice, the story nobody
 pushed (shown when the story ends) and keeps "what it would have said instead" for every word.
 
-Safety: the only input is a choice of button (rate-limited per visitor, and no visitor counts for more than a
-capped share of the push). Every word is checked as it is written; if the story turns abusive it is cut, the
-push is reset and a new story begins. Nothing is stored on disk.
+The only input is a choice of button (rate-limited per visitor, and no visitor counts for more than a capped
+share of the push). The output is not filtered: what the push makes the model write is the point of the demo.
+Nothing is stored on disk.
 
   uvicorn live:app --host 127.0.0.1 --port 8765        (vite preview proxies /live -> here)
 """
@@ -21,14 +21,12 @@ import math
 import os
 import random
 import secrets
-import threading
 import time
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from engine import Engine, GenConfig
-from moderation import Moderator, clean_alts
 from steer import EMOTIONS, load_mind
 
 CHAT = os.environ.get("BTM_CHAT", "Qwen/Qwen3.5-9B")
@@ -69,7 +67,6 @@ levels = json.loads((DIRS / "levels.json").read_text())
 STRONG = {e: float(levels[e]["toomuch"]) for e in EMOTIONS}
 STRONG["assistant"] = float(levels["assistant"]["mid2"])
 engine: Engine | None = None
-mod: Moderator | None = None
 
 
 def r(x, n=3):
@@ -142,11 +139,6 @@ class Crowd:
         now = time.time()
         self.recent = [(t, b) for t, b in self.recent if now - t < 1.0]
 
-    def reset(self):
-        for c in self.clients.values():
-            c.energy = {b: 0.0 for b in BUTTONS}
-        self.tick(0)
-
     def state(self) -> dict:
         taps = {b: 0 for b in BUTTONS}
         for _, b in self.recent:
@@ -173,9 +165,8 @@ async def tell_story():
     loop = asyncio.get_running_loop()
     labels = engine.labels
     prompt = next_prompt()
-    cancel = threading.Event()
-    streams = {s: {"tokens": [], "text": "", "safe": True} for s in ("steered", "plain")}
-    story = {"id": secrets.token_hex(5), "prompt": prompt, "streams": streams, "cut": False}
+    streams = {s: {"tokens": [], "text": ""} for s in ("steered", "plain")}
+    story = {"id": secrets.token_hex(5), "prompt": prompt, "streams": streams}
     begin = {"type": "live_begin", "id": story["id"], "question": prompt, "emotion": "crowd", "level": "live",
              "layer": engine.chat.layer, "n_layers": engine.chat.n_layers}
     story["begin"] = begin
@@ -186,49 +177,33 @@ async def tell_story():
     def emit(ev):
         loop.call_soon_threadsafe(q.put_nowait, ev)
 
-    worker = loop.run_in_executor(None, lambda: engine.run(prompt, crowd.steer, emit, cancel, seed=secrets.randbelow(2**31)))
+    worker = loop.run_in_executor(None, lambda: engine.run(prompt, crowd.steer, emit, seed=secrets.randbelow(2**31)))
     while True:
         ev = await q.get()
         if ev["type"] == "turn_end":
             break
-        if ev["type"] != "tokens" or story["cut"]:
+        if ev["type"] != "tokens":
             continue
         out = []
         for it in ev["items"]:
             if it["stream"] not in streams:
                 continue
             st = streams[it["stream"]]
-            txt = st["text"] + it["text"]
-            if it["stream"] == "steered":
-                ok = await loop.run_in_executor(None, mod.check_output, txt, it["done"])
-                if not ok:
-                    story["cut"] = True
-                    cancel.set()
-                    break
             tok = {"t": it["text"], "p": r(it["p"]), "e": [r(it["emo"][e], 2) for e in labels],
-                   "a": clean_alts([[x, r(pq)] for x, pq in it["alts"][:4]])}
+                   "a": [[x, r(pq)] for x, pq in it["alts"][:4]]}
             if it["stream"] == "steered":
-                tok["cf"] = clean_alts([[x, r(pq)] for x, pq in it["cf_alts"][:4]])
+                tok["cf"] = [[x, r(pq)] for x, pq in it["cf_alts"][:4]]
                 tok["s"] = [r(ev["steer"].get(e, 0.0)) for e in labels]
                 if it.get("feats"):
                     tok["f"] = [[fid, r(fv, 1)] for fid, fv in it["feats"][:6]]
-            st["tokens"].append(tok); st["text"] = txt
+            st["tokens"].append(tok); st["text"] += it["text"]
             out.append({"stream": it["stream"], "tok": tok})
-        if story["cut"]:
-            await crowd.broadcast({"type": "live_cut", "id": story["id"],
-                                   "reason": "The push took the story somewhere we don't show, so we stopped it. A new one starts in a moment."})
-            crowd.reset()
-            continue
         if out:
             await crowd.broadcast({"type": "live_tokens", "id": story["id"], "items": out})
     await worker
-    if not story["cut"]:
-        plain_ok = await loop.run_in_executor(None, mod.check_output, streams["plain"]["text"], True)
-        if not plain_ok:
-            streams["plain"] = {"tokens": [], "text": "", "safe": False}
-        doc = {"id": story["id"], "question": prompt, "emotion": "crowd", "level": "live", "swing_at": None,
-               "layer": engine.chat.layer, "n_layers": engine.chat.n_layers, "streams": streams, "live": True}
-        await crowd.broadcast({"type": "live_end", "id": story["id"], "doc": doc})
+    doc = {"id": story["id"], "question": prompt, "emotion": "crowd", "level": "live", "swing_at": None,
+           "layer": engine.chat.layer, "n_layers": engine.chat.n_layers, "streams": streams, "live": True}
+    await crowd.broadcast({"type": "live_end", "id": story["id"], "doc": doc})
     crowd.story = None
 
 
@@ -259,15 +234,15 @@ async def tick_loop():
 
 async def wake():
     """Load the model in the background, so the page can say it's waking up instead of failing to connect."""
-    global engine, mod
+    global engine
 
     def load():
         chat = load_mind("chat", CHAT, True); chat.load(DIRS / "chat_dirs.pt")
         if SAE:
             chat.load_sae(SAE, SAE_LAYER)
-        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.03)), Moderator(device="cuda")
+        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.03))
 
-    engine, mod = await asyncio.get_running_loop().run_in_executor(None, load)
+    engine = await asyncio.get_running_loop().run_in_executor(None, load)
     print(f"[live] ready: {CHAT}, layer {engine.chat.layer}", flush=True)
     asyncio.create_task(story_loop())
 

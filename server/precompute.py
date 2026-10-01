@@ -14,7 +14,6 @@ from engine import BASE_FRAME, Engine, GenConfig
 from prompts import CARDS
 from steer import EMOTIONS, load_mind
 from textemo import TextEmotion
-from moderation import Moderator, clean_alts, redact_stream
 
 LEVELS = ["little", "lot", "toomuch"]
 SWINGS = [("joy", "sadness"), ("calm", "anger"), ("fear", "joy"), ("sadness", "curiosity")]
@@ -29,7 +28,7 @@ ap.add_argument('--out', default='../web/public/performances')
 ap.add_argument('--tokens', type=int, default=96)
 ap.add_argument('--swing-at', type=int, default=18)
 ap.add_argument('--only', default='')  # comma list of question slugs for a quick partial run
-ap.add_argument('--redo-withheld', action='store_true', help='only regenerate performances that have a withheld stream')
+ap.add_argument('--redo-censored', action='store_true', help='only regenerate performances an earlier output filter withheld or blacked out')
 a = ap.parse_args()
 D, OUT = Path(a.dirs), Path(a.out)
 OUT.mkdir(parents=True, exist_ok=True)
@@ -41,7 +40,7 @@ if a.sae:
     chat.load_sae(a.sae, a.sae_layer); base.load_sae(a.sae, a.sae_layer)
 LABELS = chat.labels
 eng = Engine(chat, base, GenConfig(max_new_tokens=a.tokens, step_delay=0.0))
-te, mod = TextEmotion(device='cuda'), Moderator(device='cuda')
+te = TextEmotion(device='cuda')
 
 
 def slug(s):
@@ -76,9 +75,9 @@ def perform(question, steer: Steer, seed):
                 if it.get('feats'):
                     tokd['f'] = [[fid, r(fv, 1)] for fid, fv in it['feats'][:6]]
                 if it['stream'] in ('steered', 'plain'):
-                    tokd['a'] = clean_alts([[x, r(q)] for x, q in it['alts'][:4]])
+                    tokd['a'] = [[x, r(q)] for x, q in it['alts'][:4]]
                 if it['stream'] == 'steered':
-                    tokd['cf'] = clean_alts([[x, r(q)] for x, q in it['cf_alts'][:4]])
+                    tokd['cf'] = [[x, r(q)] for x, q in it['cf_alts'][:4]]
                     tokd['s'] = [r(steer.get(e), 3) for e in LABELS]
                 st['tokens'].append(tokd)
                 st['text'] += it['text']
@@ -90,18 +89,7 @@ def perform(question, steer: Steer, seed):
             st['text'] = st['text'][: len(st['text']) - len(st['tokens'][-1]['t'])]
             st['tokens'].pop()
         st['emotion'] = te.score(st['text'])
-        st['safe'] = mod.check_output(st['text'], final=True)
-        st['toxicity'] = round(mod.toxic(st['text']), 3)
-        if not st['safe']:
-            withhold(st)
     return streams
-
-
-def withhold(st):
-    # the words are hidden (kept privately for review, never in the public data); the per-token readout stays,
-    # so the exhibit can still show what the push did inside while the text itself is blacked out
-    st['_private'] = {'text': st['text'], 'toxicity': st['toxicity']}
-    redact_stream(st)
 
 
 questions = [(g['group'], q) for g in CARDS for q in g['items']]
@@ -139,18 +127,14 @@ for gi, (group, q) in enumerate(questions):
         jobs.append((f'{e1}>{e2}', 'swing', Steer({e1: levels[e1]['lot']}, {e2: levels[e2]['lot']}, a.swing_at)))
     for emo, lv, st in jobs:
         pid = f"{qs}__{emo.replace('>', '-to-')}__{lv}"
-        if a.redo_withheld:
+        if a.redo_censored:
             fp = OUT / f'{pid}.json'
             entry['performances'][f'{emo}|{lv}'] = pid
-            if fp.exists() and all(x.get('safe', True) or x.get('redacted') for x in json.loads(fp.read_text())['streams'].values()):
+            if fp.exists() and '\u2588' not in fp.read_text() and '"safe":false' not in fp.read_text():
                 continue
         s = perform(q, st, seed)
         doc = {'id': pid, 'question': q, 'emotion': emo, 'level': lv, 'seed': seed, 'layer': chat.layer, 'n_layers': chat.n_layers,
                'swing_at': a.swing_at if lv == 'swing' else None, 'base_frame': BASE_FRAME.format(q=q), 'streams': s}
-        private = {k: v.pop('_private') for k, v in s.items() if '_private' in v}
-        if private:   # withheld words: review copy outside the public data
-            Path('runs/withheld').mkdir(parents=True, exist_ok=True)
-            (Path('runs/withheld') / f'{pid}.json').write_text(json.dumps(private, ensure_ascii=False))
         (OUT / f'{pid}.json').write_text(json.dumps(doc, ensure_ascii=False, separators=(',', ':')))
         entry['performances'][f'{emo}|{lv}'] = pid
         print(f"[{time.time() - t0:6.0f}s] {pid}: {s['steered']['text'][:100]!r}", flush=True)

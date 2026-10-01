@@ -339,6 +339,41 @@ function route(name, v, into) {
   if (CHANNELS[name] !== undefined) into[name] = (into[name] || 0) + v;
 }
 
+// Visemes: the mouth shapes the words as they appear. There is no audio, so this is driven by the text's letters
+// (a rough spelling-to-mouth-shape map), timed to the moment each word is written.
+const VISEME = {
+  A: { jawOpen: 0.24, mouthLowerDown: 0.16, mouthUpperUp: 0.05 },                        // open: a
+  E: { jawOpen: 0.11, mouthStretch: 0.2, mouthSmile: 0.07, mouthLowerDown: 0.08 },       // spread: e i y
+  O: { jawOpen: 0.18, mouthFunnel: 0.3, mouthPucker: 0.12 },                              // round open: o
+  U: { jawOpen: 0.05, mouthPucker: 0.42, mouthFunnel: 0.18 },                             // round closed: u w oo
+  M: { mouthPress: 0.34, mouthClose: 0.04, mouthRollUpper: 0.04 },                        // lips together: m b p
+  F: { mouthRollLower: 0.32, mouthUpperUp: 0.12, jawOpen: 0.04 },                         // lip to teeth: f v
+  S: { jawOpen: 0.06, mouthStretch: 0.1, mouthUpperUp: 0.03 },                            // most other consonants
+  SH: { jawOpen: 0.07, mouthFunnel: 0.24, mouthPucker: 0.14 },                            // sh ch j
+  REST: {},
+};
+function visemesOf(text) {
+  const w = text.toLowerCase(), out = [];
+  const push = (v, k) => { const last = out[out.length - 1]; if (last && last[0] === v) last[1] += k * 0.4; else out.push([v, k]); };
+  for (let i = 0; i < w.length; i++) {
+    const c = w[i], n = w[i + 1];
+    if (c === '\u2588') { push('AESO'[(i * 7 + w.length) % 4], 1); continue; }   // blacked-out words: generic syllables
+    if (/\s/.test(c)) { if (out.length) push('REST', 0.5); continue; }
+    if ((c === 's' || c === 'c') && n === 'h') { push('SH', 1); i++; continue; }
+    if (c === 'o' && (n === 'o' || n === 'u' || n === 'w')) { push('U', 1.3); i++; continue; }
+    if (c === 'e' && i === w.length - 1 && i > 1) continue;                             // a silent final e
+    if (c === 'a') push('A', 1.3);
+    else if ('eiy'.includes(c)) push('E', 1.1);
+    else if (c === 'o') push('O', 1.3);
+    else if ('uw'.includes(c)) push('U', 1.1);
+    else if ('mbp'.includes(c)) push('M', 0.9);
+    else if ('fv'.includes(c)) push('F', 0.9);
+    else if (/[a-z]/.test(c)) push('S', 0.7);
+    else if (/[.,!?;:\u2014]/.test(c)) push('REST', 1.4);
+  }
+  return out;
+}
+
 // scale a channel (or both sides of one) already in a target map
 function scaleCh(into, name, k) {
   if (CHANNELS[name] !== undefined) { if (into[name]) into[name] *= k; return; }
@@ -423,6 +458,7 @@ export class AndroidFace {
     this.pointer = { x: 0, y: 0, t: -10, press: -10, glanceUntil: 0, glanceAt: 0, pending: null, lastNotice: -10 };
     this.posture = { next: 6 + 6 * this.rand(), target: [0, 0, 0], cur: { p: { x: 0, v: 0 }, y: { x: 0, v: 0 }, r: { x: 0, v: 0 } } };
     this.mouthing = { t: 0, next: 0, target: {}, cur: {} };
+    this.speak = { q: [], end: 0, cur: {}, last: -10 };   // queued visemes {v, t0, t1}
     this.pupil = { x: 0.34, v: 0 };
     this.irisColor = new THREE.Color('#7fe7ff');
     this.irisGlow = 1.0;
@@ -683,6 +719,22 @@ export class AndroidFace {
     if (target === 'camera' || target == null) { this.gazeMode = 'camera'; return; }
     if (target.isVector3) { this.gazeMode = 'world'; this.gazeTarget.copy(target); return; }
     if (typeof target.x === 'number' && typeof target.y === 'number') { this.gazeMode = 'screen'; this.gazeScreen = { x: target.x, y: target.y }; }
+  }
+
+  /** Mouth the words of `text` over about `dur` seconds (called as each word is written). */
+  say(text, dur = 0.15) {
+    const vis = visemesOf(text || '');
+    if (!vis.length) return;
+    const S = this.speak, t = this.time;
+    let start = Math.max(t, S.end);
+    if (start > t + 0.3) start = t + 0.3;               // never lag far behind the words: skip what didn't fit
+    S.q = S.q.filter((f) => f.t0 < start);
+    for (const f of S.q) f.t1 = Math.min(f.t1, start);
+    const total = vis.reduce((a, [, k]) => a + k, 0);
+    const per = clamp(dur / total, 0.045, 0.1);
+    let tt = start;
+    for (const [v, k] of vis) { S.q.push({ v, t0: tt, t1: tt + k * per }); tt += k * per; }
+    S.end = tt; S.last = t;
   }
 
   setActivity({ writing = false } = {}) {
@@ -976,11 +1028,12 @@ export class AndroidFace {
     if (W > 0.01) {
       add('browDown', 0.06 * W * (0.6 + 0.4 * this.noise.at(t * 0.3 + 5)));
       add('eyeSquint', 0.05 * W);
-      this._mouthing(dt, t, W, add);
+      if (t - this.speak.last > 1.5) this._mouthing(dt, t, W, add);   // nobody is feeding it words: idle mouthing
     }
 
     // breathing (computed before the AU springs so it can flare the nostrils / part the lips)
     this._breathe(dt, t, add, post);
+    this._speak(dt, t, post);
 
     // timed reactions and conversational beats
     const ovHead = { pitch: 0, yaw: 0, roll: 0, z: 0 };
@@ -1158,6 +1211,21 @@ export class AndroidFace {
     } else if (B.kind === 'shudder' && ph < B.inhale) {
       add('browInnerUp', 0.1 * sad); route('mouthShrugLower', 0.06 * sad * Math.abs(Math.sin(ph / B.inhale * 3 * Math.PI)), post);
     } else if (ar > 0.3 && ph > B.inhale) add('jawOpen', 0.012 * ar);
+  }
+
+  _speak(dt, t, post) {
+    // the current viseme, through fast springs (coarticulation: quick words only half-form each shape); excited
+    // speech moves the mouth more, sad or calm speech less
+    const S = this.speak, f = this.felt || {};
+    S.q = S.q.filter((x) => x.t1 > t - 0.05);
+    const cur = S.q.find((x) => t >= x.t0 && t < x.t1);
+    const target = cur ? VISEME[cur.v] : VISEME.REST;
+    const gain = clamp(1 + 0.35 * Math.max(0, this.arousal || 0) - 0.3 * (f.sadness || 0) - 0.35 * (f.calm || 0), 0.55, 1.35);
+    for (const k of new Set([...Object.keys(S.cur), ...Object.keys(target)])) {
+      const s = (S.cur[k] ||= { x: 0, v: 0 });
+      spring(s, (target[k] || 0) * gain, 34, dt);
+      if (s.x > 1e-3) route(k, s.x, post);
+    }
   }
 
   _mouthing(dt, t, W, add) {

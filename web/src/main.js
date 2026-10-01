@@ -247,6 +247,7 @@ async function play(opts = {}) {
     const t = tok.t;
     if (beatFor(tok, i, lastEmph)) lastEmph = i;
     let wait = 62 + Math.min(80, t.length * 6);
+    stage.face.say(t, wait / 1000 / (opts.fast ? 3 : 1));   // mouth the word while it appears
     if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
     if (opts.live) wait = Math.min(wait, 140);           // live: tokens already arrive at reading pace
     const spent = performance.now() - lastT;

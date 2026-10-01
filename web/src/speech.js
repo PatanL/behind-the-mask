@@ -15,10 +15,12 @@ export class Speech {
     });
   }
 
-  clear() { this.el.innerHTML = ''; this.caret = null; this.spans = []; }
+  // clear(): an empty page for a static render (shown in full); begin(): a live subtitle window; end(): full text
+  clear() { this.el.innerHTML = ''; this.caret = null; this.spans = []; this.el.classList.add('full'); this.el.classList.remove('scrolled'); this.el.scrollTop = 0; }
 
   begin() {
     this.clear();
+    this.el.classList.remove('full');
     this.caret = document.createElement('span');
     this.caret.className = 'caret';
     this.el.appendChild(this.caret);
@@ -48,11 +50,11 @@ export class Speech {
       this.spans[i] = s;
       if (!instant) setTimeout(() => s.classList.remove('new'), 520);
     });
-    if (instant) return;
+    if (instant && this.el.classList.contains('full')) return;
     // keep the newest line in view but let early lines stay visible as long as possible
     const over = this.el.scrollHeight - this.el.clientHeight;
-    if (over > 0) this.el.scrollTo({ top: over, behavior: 'smooth' });
+    if (over > 0) { if (instant) this.el.scrollTop = over; else this.el.scrollTo({ top: over, behavior: 'smooth' }); this.el.classList.add('scrolled'); }
   }
 
-  end() { this.caret?.remove(); this.caret = null; }
+  end() { this.caret?.remove(); this.caret = null; this.el.classList.add('full'); this.el.scrollTop = 0; }
 }

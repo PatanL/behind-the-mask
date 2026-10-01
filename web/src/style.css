@@ -37,9 +37,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brand-mark { width: 22px; height: 22px; border-radius: 50% 50% 46% 46%; background: linear-gradient(160deg, #fff, #cfd3e0 60%, #8d93a8); box-shadow: 0 0 18px color-mix(in srgb, var(--push) 60%, transparent); }
 .top-nav { display: flex; gap: 6px; }
 
-/* ---------- stage: face + speech + inside ---------- */
-.stage-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) 150px; grid-template-areas: "stage speech inside"; gap: clamp(12px, 2vw, 28px); align-items: center; min-height: min(62vh, 640px); }
-.stage { grid-area: stage; position: relative; aspect-ratio: 4 / 5; max-height: 64vh; width: 100%; justify-self: center; }
+/* ---------- stage: the face centre stage, its words as subtitles right under it, readouts either side ---------- */
+.stage-wrap { display: grid; grid-template-columns: 200px minmax(0, 1fr) 200px; grid-template-areas: "l stage r" "l speech r"; column-gap: clamp(12px, 2vw, 28px); row-gap: 4px; align-items: start; }
+.stage { grid-area: stage; position: relative; aspect-ratio: 1 / 1; height: min(56vh, 600px); max-width: 100%; justify-self: center; }
 #face-canvas { width: 100%; height: 100%; display: block; border-radius: 28px; }
 .stage-caption { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 32px); text-align: center; font-size: 14px; line-height: 1.3; color: var(--ink); min-height: 18px; }
 .stage-caption:not(:empty) { padding: 7px 14px; border-radius: 999px; background: rgba(10,12,24,0.72); border: 1px solid color-mix(in srgb, var(--push) 40%, transparent); backdrop-filter: blur(8px); animation: capin 0.35s ease-out; }
@@ -47,9 +47,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .push-badge { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
   background: color-mix(in srgb, var(--push) 22%, rgba(10,12,24,0.8)); border: 1px solid color-mix(in srgb, var(--push) 55%, transparent); color: var(--ink); white-space: nowrap; box-shadow: 0 0 24px color-mix(in srgb, var(--push) 35%, transparent); }
 
-.speech-wrap { grid-area: speech; align-self: center; }
-.speech-label { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink3); margin-bottom: 14px; }
-.speech { font-family: var(--serif); font-size: clamp(19px, 1.85vw, 29px); line-height: 1.42; font-weight: 400; min-height: 7.5em; max-height: 60vh; overflow: hidden auto; letter-spacing: -0.005em; scrollbar-width: none; }
+.speech-wrap { grid-area: speech; justify-self: center; width: min(100%, 820px); }
+.speech-label { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink3); margin: 6px 0 8px; text-align: center; }
+/* while it speaks: a four-line subtitle window, older lines fading up and out; when it's done, the whole text */
+.speech { --lines: 4; font-family: var(--serif); font-size: clamp(20px, 1.75vw, 28px); line-height: 1.42; font-weight: 400; min-height: calc(1.42em * var(--lines)); max-height: calc(1.42em * var(--lines)); overflow: hidden; letter-spacing: -0.005em; scrollbar-width: none; }
+.speech.scrolled:not(.full) { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.3em); mask-image: linear-gradient(to bottom, transparent 0, #000 1.3em); }
+.speech.full { max-height: none; overflow: visible; }
+.hero:not([hidden]) ~ .speech:empty { min-height: 0; }
 .speech::-webkit-scrollbar { display: none; }
 .tok { transition: color 0.6s ease, text-shadow 0.6s ease; border-radius: 4px; }
 .tok.new { animation: tokin 0.5s ease-out both; }
@@ -61,7 +65,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes blink { 50% { opacity: 0; } }
 .speech-hint { margin-top: 14px; font-size: 14px; color: var(--ink2); }
 
-.inside { grid-area: inside; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 14px; }
+.inside { display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 14px; }
+.inside-l { grid-area: l; } .inside-r { grid-area: r; }
 .inside-title { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink3); }
 #spine { width: 110px; height: 200px; }
 .meters { width: 100%; display: grid; gap: 5px; }
@@ -157,8 +162,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 1100px) {
-  .stage-wrap { grid-template-columns: minmax(0, 1fr) 130px; grid-template-areas: "stage inside" "speech speech"; }
-  .stage { max-height: 50vh; }
+  .stage-wrap { grid-template-columns: 140px minmax(0, 1fr) 140px; }
+  .stage { height: min(50vh, 520px); }
+  .feelmap { width: 130px; height: 130px; }
   .deck { grid-template-columns: 1fr 1fr; }
   .step-go { grid-column: 1 / -1; flex-direction: row; align-items: center; }
   .step-go .go { flex: 1; }
@@ -166,13 +172,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 @media (max-width: 720px) {
   .stage-wrap { grid-template-columns: 1fr; grid-template-areas: "stage" "speech"; min-height: 0; }
-  .stage { max-height: 46vh; aspect-ratio: 1 / 1; }
+  .stage { height: auto; width: 100%; max-height: 46vh; aspect-ratio: 1 / 1; }
   .inside { display: none; }
+  .speech { --lines: 4; font-size: 19px; }
   .deck { grid-template-columns: 1fr; padding: 14px; }
   .orbs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .cards { grid-template-columns: 1fr; }
-  .speech { min-height: 5em; }
-  .step-go { flex-direction: column; }
+    .step-go { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) { .tok.new { animation: none; } .reveals { animation: none; } }
 
@@ -300,8 +306,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .live-plain-h { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink2); }
 #live-leave { justify-self: start; }
 /* live: keep the face in view while the story grows; the story scrolls in its own box */
-@media (min-width: 1100px) { body.live .stage, body.live .inside { align-self: start; position: sticky; top: 12px; } body.live .speech-wrap { align-self: start; } }
-body.live .speech { max-height: 40vh; }
 .live-plain .card-text { max-height: 26vh; overflow: auto; }
 /* phones: the feeling buttons ride along at the bottom of the screen while you watch */
 @media (max-width: 1099px) {
@@ -311,7 +315,6 @@ body.live .speech { max-height: 40vh; }
   body.live .tapb { padding: 8px 2px 6px; font-size: 10.5px; gap: 4px; }
   body.live .tapb .ball { width: 28px; height: 28px; }
   body.live .tapb .ring { top: 22px; width: 28px; height: 28px; margin: -14px 0 0 -14px; }
-  body.live .speech { max-height: 34vh; }
   body.live .tapb .long { display: none; }
 }
 .tapb .short { display: none; }

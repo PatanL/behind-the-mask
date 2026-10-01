@@ -108,6 +108,7 @@ export function createLive(ctx) {
       ctx.spine.pulse(); ctx.spine.setMeters(ema); ctx.feelmap.setState(ema);
       ctx.showFeatures(tok);
       ctx.beat(tok, i);
+      stage.face.say(tok.t, 0.15);
       stage.setGlow(Math.max(0.15, Math.min(1, (focus === 'unmask' ? tint.unmask : focus ? ema[focus] : 0) * 1.3)));
       if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
     }
@@ -136,17 +137,7 @@ export function createLive(ctx) {
     if (msg.doc) { story.steered = msg.doc.streams.steered.tokens; story.plain = plain?.tokens || story.plain; syncDoc(); }
     countdown(7);
   }
-  function cut(msg) {
-    if (!story || msg.id !== story.id) return;
-    speech.end();
-    $('#speech').classList.add('redacted');
-    speech.el.querySelectorAll('.tok').forEach((s) => { s.textContent = s.textContent.replace(/\S/g, '█'); });
-    const n = $('#withheld-note'); n.textContent = msg.reason; n.hidden = false;
-    stopFace();
-    story = null;
-    countdown(7);
-  }
-  // the story stopped without an end (cut, server error, lost connection): the face stops writing and settles
+  // the story stopped without an end (server error, lost connection): the face stops writing and settles
   function stopFace() {
     speech.end();
     stage.face.setActivity({ writing: false });
@@ -192,7 +183,6 @@ export function createLive(ctx) {
       else if (msg.type === 'live_begin') begin(msg);
       else if (msg.type === 'live_tokens') { if (msg.catchup && (!story || story.id !== msg.id)) return; tokens(msg); }
       else if (msg.type === 'live_end') end(msg);
-      else if (msg.type === 'live_cut') cut(msg);
       else if (msg.type === 'live_error') { if (story) { stopFace(); story = null; } status('Something went wrong with that story. A new one starts in a moment.'); }
     };
     ws.onclose = () => {

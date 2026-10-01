@@ -66,7 +66,7 @@ export class Stage {
     this.camera.aspect = w / h;
     // keep the whole head in frame on tall and wide stages
     // frame head and shoulders; tall (phone) stages step back a little further
-    const fit = w / h < 0.8 ? 1.02 : 0.9;
+    const fit = w / h < 0.8 ? 1.02 : w / h < 1.15 ? 0.8 : 0.9;   // square centre stage: closer, the face is the star
     this.camera.position.set(0, 0.035, fit + 0.03);
     this.camera.lookAt(this.lookAt);
     this.camera.updateProjectionMatrix();
