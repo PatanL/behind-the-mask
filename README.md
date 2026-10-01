@@ -1,4 +1,6 @@
-# Behind the Mask
+# Steer AI
+
+Live at https://steerai.live
 
 **An interactive exhibit: push an AI toward joy, sadness, fear… by editing its hidden state, and see what's
 behind its friendly assistant persona.**

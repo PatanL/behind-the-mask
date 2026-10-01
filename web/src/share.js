@@ -38,7 +38,7 @@ export function cardImage({ question, answer, emotion, level, faceCanvas }) {
     faceBottom = 30 + fh * 0.86;
   }
   ctx.fillStyle = '#aab0c6'; ctx.font = '600 30px Inter, system-ui, sans-serif';
-  ctx.fillText('BEHIND THE MASK', 72, 110);
+  ctx.fillText('STEER AI', 72, 110);
   const lv = { little: 'a little', lot: 'a lot', toomuch: 'way too much' }[level] || '';
   const badge = emotion === 'none' ? 'No push · as trained' : emotion === 'unmask' ? `Assistant persona pushed away${lv ? ' · ' + lv : ''}` : `Pushed toward ${EMO[emotion]?.label.toLowerCase() || emotion}${lv ? ' · ' + lv : ''}`;
   ctx.font = '600 34px Inter, system-ui, sans-serif';
