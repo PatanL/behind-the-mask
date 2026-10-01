@@ -8,12 +8,14 @@ HOLD = 40
 PROBES = int(os.environ.get("PROBES", "3")); TAG = os.environ.get("TAG", "")
 BTN = ["joy", "sadness", "anger", "fear", "calm", "curiosity", "unmask"]
 stats = {"bytes": 0, "drops": 0, "full": 0, "lite": 0, "conns": 0}
+errors = {}
 probe_gaps = []; probe_words = [0]
 
 async def viewer(i, probe, stop):
+    joined = False
     try:
         async with websockets.connect(f"{URL}?cid=load{i}", max_size=2**22, open_timeout=30, ping_interval=None) as ws:
-            stats["conns"] += 1
+            stats["conns"] += 1; joined = True
             tapper = (not probe) and random.random() < 0.4
             fav = random.choice(BTN)
             async def taps():
@@ -36,10 +38,10 @@ async def viewer(i, probe, stop):
                 elif '"full"' in raw[:20]: stats["full"] += 1; break
                 elif '"mode"' in raw[:20]: stats["lite"] += 1
             if t: t.cancel()
-    except Exception:
-        stats["drops"] += 1
+    except Exception as e:
+        stats["drops"] += 1; k = f"{type(e).__name__}: {str(e)[:80]}"; errors[k] = errors.get(k, 0) + 1
     finally:
-        stats["conns"] -= 1
+        if joined: stats["conns"] -= 1
 
 async def main():
     stop = asyncio.Event(); tasks = []
@@ -57,5 +59,6 @@ async def main():
         q = lambda p: g[min(len(g) - 1, int(p * len(g)))] if g else float('nan')
         print(f"[{time.strftime('%H:%M:%S')}] {N:5d} viewers: connected {stats['conns']}, drops {stats['drops']}, lite {stats['lite']}, full {stats['full']} | "
               f"batch gap s: median {q(.5):.2f} p99 {q(.99):.2f} max {g[-1] if g else float('nan'):.2f} | {rate/1024:.2f} KB/s per viewer | probe {probe_words[0]/(time.time()-t0):.1f} words/s", flush=True)
+        for k, v in sorted(errors.items(), key=lambda kv: -kv[1])[:4]: print(f"    {v}x {k}", flush=True)
     stop.set(); await asyncio.gather(*tasks, return_exceptions=True)
 asyncio.run(main())

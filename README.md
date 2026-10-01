@@ -123,6 +123,13 @@ Variables) and re-run the Pages workflow. The page connects to `LIVE_URL/live/ws
 `/live/status` requests from the Pages origin (`BTM_ORIGINS`). If the live server is unreachable, the page simply
 opens on the ready-made answers.
 
+Funnel has an unpublished bandwidth limit and, measured, accepts 20 open connections per visitor address. Many
+visitors behind one address (a venue's Wi-Fi) past that, viewers past `BTM_MAX_VIEWERS`, all get the ready-made
+answers with a note. Past `BTM_MAX_FULL` viewers, new ones get a lighter stream a few seconds behind.
+`server/loadtest.py` simulates a crowd (5,000 viewers through the local proxy: about 1 KB/s each, words every
+0.5 s, under one CPU core). Devices on your own tailnet resolve the Funnel name to its Tailscale address, which
+Chrome blocks from a public page; test those on the Funnel address itself.
+
 ## Models, data and licences
 
 | Component | Licence |

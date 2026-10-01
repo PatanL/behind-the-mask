@@ -262,9 +262,9 @@ function setupLive() {
     setDoc: (doc) => { if (state.mode === 'live') state.doc = doc; },
     beat: (tok, i) => { if (i < liveLastEmph) liveLastEmph = -10; if (beatFor(tok, i, liveLastEmph)) liveLastEmph = i; },
     onFull: (n) => {
-      // the live room is full: a ready-made answer instead, and the Live tab is offered again in a minute
+      // the live room is full (or can't be reached): a ready-made answer instead, and the Live tab is offered again
       setMode('made');
-      $('#go-note').textContent = `Live is full right now (${n} watching). Try a ready-made answer, then Live again in a minute.`;
+      $('#go-note').textContent = `Live is ${n ? `full right now (${n} watching)` : 'busy right now'}. Try a ready-made answer, then Live again in a minute.`;
     },
     onPush: (lead, p) => {
       const lv = p < 0.35 ? 'little' : p < 0.7 ? 'lot' : 'toomuch', key = `${lead}|${lv}`;

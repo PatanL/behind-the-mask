@@ -29,7 +29,7 @@ export async function liveStatus() {
  */
 export function createLive(ctx) {
   const { $, stage, speech } = ctx;
-  let ws = null, on = false, story = null, lastListen = 0, retry = 0, shownTalk = null, topic = '', viewers = 0, lite = false;
+  let ws = null, on = false, story = null, lastListen = 0, retry = 0, refused = 0, shownTalk = null, topic = '', viewers = 0, lite = false;
   // taps go out in batches (counts per feeling, every 0.4 s): a tenth of the messages, the same push
   const counts = {};
   let tapTimer = 0;
@@ -223,22 +223,27 @@ export function createLive(ctx) {
   }
 
   function connect() {
-    ws = new WebSocket(wsUrl());
-    ws.onopen = () => { retry = 0; };
+    const sock = ws = new WebSocket(wsUrl());
+    let opened = false;
+    ws.onopen = () => { retry = 0; refused = 0; opened = true; };
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'crowd') crowd(msg);
       else if (msg.type === 'wc') catchUp(msg);                                 // a late joiner's catch-up: at once
       else if (msg.type === 'alts') { const r = altWait.get(`${msg.id}:${msg.i}`); if (r) { altWait.delete(`${msg.id}:${msg.i}`); r(msg); } }
       else if (msg.type === 'mode') { lite = !!msg.lite; label(); }
-      else if (msg.type === 'full') { on = false; ctx.onFull?.(msg.viewers); }   // the room is full: ready-made answers instead
+      else if (msg.type === 'full') { ctx.onFull?.(msg.viewers); on = false; }   // the room is full: ready-made answers instead (leave() cleans up)
       else if (msg.type === 'live_begin' && !queue.length && !pacer) begin(msg);
       else enqueue(msg);
     };
     ws.onclose = () => {
+      if (sock !== ws) return;                                                   // an old socket closing late
       clearTimeout(pacer); pacer = 0; queue.length = 0; primed = false;
       if (!on) return;
       if (story) { stopFace(); story = null; }
+      // turned away at the door three times (the tunnel caps connections per address, e.g. one busy venue Wi-Fi):
+      // ready-made answers instead of a page stuck on "Reconnecting…"
+      if (!opened && ++refused >= 3) { ctx.onFull?.(null); on = false; return; }
       status('Reconnecting…');
       setTimeout(() => on && connect(), Math.min(8000, 800 * 2 ** retry++));
     };
@@ -258,7 +263,7 @@ export function createLive(ctx) {
     },
     enter() {
       if (on) return;
-      on = true;
+      on = true; refused = 0;
       story = null; shownTalk = null;
       speech.clear();
       status('Connecting…');
