@@ -81,6 +81,34 @@ lip-corner pull (AU12), lip-corner depress (AU15), and so on. Each emotion is a 
 units (EMFACS prototypes). How strongly each unit moves, and with what timing, is an artistic mapping of the
 measured readout, not a measurement of anything the model feels.
 
+**From readout to face.** The raw readout has cross-talk: the anger direction also rises when we push fear or
+sadness. A face driven by it directly would show every negative feeling at once. So the face reads it through
+a small linear decoder (6×6), fitted with ridge regression on every token of every pre-computed push to recover
+which feeling was pushed and how hard (`web/scripts/fit-decoder.mjs`). With no push it reads about zero.
+
+**Acting layer** (`web/src/face/face.js`), drawn from the psychology of facial behaviour:
+- *Blends*: two feelings at once don't average out; each part of the face carries one of them, like sad brows
+  over a smile (bittersweet), or a smile without the eyes and with the lips drawn back (nervous).
+- *Display rules*: the Mask meter (the assistant-axis reading) acts like a learned professional face. Near
+  the assistant voice, negative feelings are muted in the lower face and covered by a polite smile, while the
+  brows keep showing them. Pushed off the axis, as strong steering does by itself, the regulation falls away.
+- *Leaks*: under regulation, the real feeling flashes across part of the face for a fifth of a second, then
+  gets covered (lip press, polite smile, a blink or glance away).
+- *Timing*: felt smiles rise smoothly, with the cheek raise trailing the lip corners. Polite smiles switch on
+  and off quickly and a little lopsided. Sudden feelings overshoot, then settle.
+- *Body*: a startle gasp and held breath (fear), a held breath forced out through the nose (anger), a breath
+  that catches and a trembling chin (sadness), a small laugh (joy), a sigh of relief when a bad feeling drains.
+  The eyes change too: a hard, unblinking stare (anger), darting scans (fear), slow saccades and heavy blinks
+  (sadness).
+
+| Topic | Reference |
+|---|---|
+| Display rules, and leakage of concealed feelings | Ekman & Friesen, *The repertoire of nonverbal behavior: categories, origins, usage, and coding*, Semiotica 1, 1969; Ekman & Friesen, *Nonverbal leakage and clues to deception*, Psychiatry 32, 1969 |
+| Blends: different feelings in different parts of the face | Ekman & Friesen, *Unmasking the Face*, Prentice-Hall, 1975 |
+| How long micro-expressions last | Yan, Wu, Liang, Chen & Fu, *How fast are the leaked facial expressions: the duration of micro-expressions*, Journal of Nonverbal Behavior 37, 2013 |
+| Posed versus spontaneous smiles move differently | Schmidt, Ambadar, Cohn & Reed, *Movement differences between deliberate and spontaneous facial expressions: zygomaticus major action in smiling*, Journal of Nonverbal Behavior 30, 2006 |
+| The eyebrow flash greeting | Eibl-Eibesfeldt, *Human Ethology*, Aldine de Gruyter, 1989 |
+
 | Topic | Reference |
 |---|---|
 | Facial Action Coding System | Ekman & Friesen, *Facial Action Coding System*, Consulting Psychologists Press, 1978; Ekman, Friesen & Hager, FACS manual, 2002 |
@@ -94,3 +122,11 @@ measured readout, not a measurement of anything the model feels.
   are not independent: anger and fear share about half their direction (cosine about 0.5).
 - Feature names are written by the model from a handful of examples. They are good guesses, not ground truth.
 - Too much steering breaks fluency. The dial ranges are capped using the sweeps in `server/calibrate.py`.
+- The face's decoder is fitted on our own pushes, so it shows the feeling that was pushed more cleanly than
+  the raw readout does. It is an intervention-trained display decoder: it recovers which push was applied,
+  on the same runs it was fitted on. It is not an independently validated emotion sensor. The colours and
+  meters still show the raw readout.
+- The polite mask and the leaks are a scripted performance, driven by the Mask meter. They show the idea of
+  a trained persona covering what is underneath. They are not evidence that the model hides real feelings.
+- Some strong pushes (mostly anger) make the model abusive. Those answers are withheld: their words are
+  blacked out, but their measured readout still plays on the colours and the face.

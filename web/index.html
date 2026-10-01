@@ -32,10 +32,24 @@
           <h1 class="hero-h">What happens if you reach inside an AI and turn up a feeling?</h1>
           <p class="hero-p">This AI has hidden directions for joy, fear, anger and more, plus one for its polite assistant persona. Push on one and watch its words, and its face, change.</p>
           <div class="hero-cta"><button class="pill big" id="tour">▶ Show me (60 seconds)</button><button class="link" id="skip-tour">I'll explore myself</button></div>
+          <button class="live-cta" id="hero-live" hidden><i class="live-dot"></i><span><b>Live now:</b> steer one AI together with everyone on this page</span><span class="live-n" id="hero-live-n"></span></button>
         </div>
         <div class="tour-step" id="tour-step" hidden></div>
         <div class="speech-label" id="speech-label" hidden>It will answer here.</div>
         <div class="speech" id="speech" aria-live="polite"></div>
+        <div class="withheld-note" id="withheld-note" hidden>At this strength the pushed AI turned abusive, so we black out its words. The colour and the face still show what was measured inside it while it wrote them.</div>
+        <div class="live-panel" id="live" hidden>
+          <div class="live-h">Everyone on this page is steering <b>the same AI</b>, right now. Tap or hold a feeling to push its story that way. Taps fade after a few seconds.</div>
+          <div class="live-buttons" id="live-buttons"></div>
+          <div class="crowd"><div class="crowd-bar" id="crowd-bar"></div><div class="crowd-meta"><span id="crowd-power">Connecting…</span><span id="crowd-viewers"></span></div></div>
+          <div class="live-status" id="live-status"></div>
+          <div class="live-plain" id="live-plain" hidden>
+            <div class="live-plain-h">The same story, with nobody pushing</div>
+            <p class="card-sub">Same AI, same random dice, written word for word alongside yours. Every difference came from your taps.</p>
+            <div class="card-text" id="live-plain-text"></div>
+          </div>
+          <button class="link" id="live-leave">← Back to the ready-made answers</button>
+        </div>
         <div class="speech-hint" id="speech-hint" hidden>Colour shows how strongly the feeling registers inside it. <u>Underlined</u> words are where the push flipped its choice. Tap any word to see what it was deciding between.</div>
       </section>
 
@@ -83,6 +97,10 @@
     </section>
 
     <section class="deck" id="deck">
+      <div class="mode" id="mode" hidden>
+        <button class="mode-b" id="mode-made" aria-pressed="true">Ready-made answers</button>
+        <button class="mode-b" id="mode-live" aria-pressed="false"><i class="live-dot"></i> Live, with everyone <span class="live-n" id="mode-live-n"></span></button>
+      </div>
       <div class="step step-q">
         <div class="step-title"><span class="n">1</span> Pick something to ask</div>
         <div class="chips" id="questions"></div>

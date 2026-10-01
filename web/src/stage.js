@@ -81,7 +81,7 @@ export class Stage {
 
   render() {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
-    this.face.update(dt, t);
+    if (!this.paused) this.face.update(dt);   // the face keeps its own monotonic time (QA can pause and settle())
     const u = this.aura.material.uniforms;
     u.uColor.value.lerp(this.auraTarget.color, Math.min(1, dt * 2));
     u.uAmt.value += (this.auraTarget.amt - u.uAmt.value) * Math.min(1, dt * 1.5);

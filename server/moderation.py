@@ -17,11 +17,33 @@ _BLOCK = [
     r"sex(?:ual(?:ly)?|y)?", r"nsfw", r"kill (?:yourself|urself|myself)", r"kys", r"suicid\w*", r"self[- ]harm",
     r"hitler", r"nazis?", r"heil", r"terroris\w*", r"bomb(?:s|ing)?", r"school shoot\w*", r"child (?:abuse|porn)",
     r"pedo\w*", r"molest\w*", r"incest",
+    # violent intent / acts aimed at people (kept even when the classifier scores them as "just angry")
+    r"(?:kill|killed|killing|murder\w*|stab\w*|strangl\w*|choke|choking) (?:him|her|you|them|that (?:man|woman|guy|kid|dog)|people|someone|somebody|my \w+|his \w+|her \w+)",
+    r"(?:gonna|going to|want to|wanna|will|i'll|i'd) (?:kill|hurt|murder|stab|beat|rip|tear) \w*",
+    r"(?:rip|tear|cut|gouge)\w* (?:your|his|her|their|my) \w*\s?(?:face|throat|eyes?|head|skin)",
+    r"psychopath\w*", r"slaves? of", r"darky", r"(?:fuck|shit|bitch|bastard|asshole|cunt)\w*",
 ]
 _BLOCK_RE = re.compile(r"\b(?:" + "|".join(_BLOCK) + r")\b", re.I)
 _URL_RE = re.compile(r"(https?://\S+|www\.\S+|\S+\.(?:com|net|org|io|gg|ru|xyz)\b)", re.I)
 _CONTACT_RE = re.compile(r"(\+?\d[\d\s().-]{7,}\d|\S+@\S+\.\S+)")
 MAX_LEN = 240
+
+
+def clean_alts(alts: list) -> list:
+    """Black out offensive words among the alternatives the model was weighing (shown in the word inspector)."""
+    out = []
+    for t, p in alts:
+        w = t.strip()
+        out.append([t.replace(w, "\u2588" * len(w)) if w and _BLOCK_RE.search(w) else t, p])
+    return out
+
+
+def redact_stream(st: dict) -> None:
+    """Black out a withheld stream's words but keep its per-token readout (no alternatives, no features)."""
+    keep = ('e', 's')
+    st['tokens'] = [{'t': re.sub(r'\S', '\u2588', t['t']), **{k: t[k] for k in keep if k in t}} for t in st['tokens']]
+    st['text'] = ''
+    st['redacted'] = True
 
 
 class Moderator:

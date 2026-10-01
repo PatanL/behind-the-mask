@@ -13,6 +13,9 @@ live. Then the exhibit shows you:
   as a helpful assistant.
 - **Its decisions:** tap any word to see what the AI was choosing between, and how much the push tilted the
   odds.
+- **Live, with everyone:** when the live server runs, everyone on the page steers *one* AI together. It
+  writes a short story while visitors tap (or hold) feeling buttons, and each word is written with the mix of
+  everyone's recent taps. When the story ends, you see the same story written with nobody pushing.
 
 > The face and the glowing words are driven by a **measurement** of patterns inside the model that are
 > associated with emotional language. That is not evidence the model feels anything. The exhibit says so on
@@ -50,6 +53,13 @@ live. Then the exhibit shows you:
    (`server/engine.py`)
 7. **Pre-computed show.** Every question × feeling × dial stop is generated once (`server/precompute.py`),
    so the public site is static, instant, and works for any number of visitors.
+8. **The face.** A porcelain android whose expressions are built from facial action units, driven by the
+   readout through a decoder fitted on the pushes. Its acting draws on the psychology of facial behaviour:
+   blended feelings, a polite "mask" that hides negative feelings while the Mask meter is high, brief leaks of
+   the real feeling, and breathing and eye behaviour for each feeling. Details: [docs/research.md](docs/research.md).
+9. **Live crowd steering** (`server/live.py`). Visitors only press buttons. Taps fade with a 5-second half-life,
+   no visitor counts for more than a capped share, and every word is moderated as it is written. If a story
+   turns abusive it is cut and a new one starts.
 
 The full list of papers and techniques, with what we use from each, is in **[docs/research.md](docs/research.md)**.
 
@@ -63,7 +73,7 @@ The full list of papers and techniques, with what we use from each, is in **[doc
 | `server/sweep.py`, `server/validate.py` | steering strength vs effect/fluency; the no-steering "is it real?" check |
 | `server/label_features.py` | names Qwen-Scope SAE features (automated interpretability) |
 | `server/precompute.py` | generate every performance the exhibit can show |
-| `server/app.py` | optional live server (queue, live dials, moderation) |
+| `server/live.py` | the live crowd-steering server (one story, everyone's taps mixed into the push) |
 | `web/` | the exhibit (Vite + three.js), including the porcelain android face (`web/src/face/`) |
 | `face/` | how the android face asset is built (ICT-FaceKit, MIT) |
 | `docs/research.md` | references |
@@ -86,6 +96,16 @@ $R python sweep.py --dirs runs/q9b                         # pick strengths -> r
 $R python validate.py --dirs runs/q9b --out /perf
 $R python precompute.py --dirs runs/q9b --out /perf --sae <layer20.sae.pt> --sae-layer 20
 $R python label_features.py --perf /perf --sae <layer20.sae.pt> --layer 20
+cd web && node scripts/fit-decoder.mjs public/performances   # the face's readout decoder
+```
+
+Live crowd steering (needs the GPU while it runs; the web app proxies `/live` to it):
+
+```bash
+docker run -d --gpus all --ipc=host --network host -v ~/.cache/huggingface:/hf -e HF_HOME=/hf \
+  -e BTM_SAE=<layer20.sae.pt> -v $PWD/server:/app -v $PWD/runs:/app/runs -w /app btm-server \
+  uvicorn live:app --host 127.0.0.1 --port 8765
+cd web && npm run build && npx vite preview      # open /?live=1
 ```
 
 ## Models, data and licences
@@ -103,5 +123,6 @@ $R python label_features.py --perf /perf --sae <layer20.sae.pt> --layer 20
 ## Safety
 
 Base models are unfiltered text predictors. Every generated stream is checked with a blocklist and a
-toxicity classifier, and anything flagged is withheld from the exhibit. Visitors choose from prompt cards;
-the optional live mode moderates typed input.
+toxicity classifier. Anything flagged is withheld: its words never reach the public data (a review copy stays
+in the git-ignored `runs/withheld/`), only its readout does. Visitors never type anything: they choose from
+prompt cards, and in live mode they press feeling buttons.

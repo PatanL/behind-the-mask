@@ -74,7 +74,7 @@ function spring(s, target, omega, dt) {
 const REGION_TIMES = {
   brow: [0.16, 0.42],
   lid: [0.12, 0.30],
-  cheek: [0.42, 0.85],
+  cheek: [0.58, 0.95],   // AU6 trails AU12 in a felt smile
   nose: [0.30, 0.65],
   mouth: [0.50, 0.95],
   jaw: [0.38, 0.70],
@@ -201,6 +201,55 @@ const POSTURE = {
 
 // arousal and valence (Russell) per emotion -- drives blink rate, breathing, saccades, pupils
 const AROUSAL = { joy: 0.45, sadness: -0.35, anger: 0.8, fear: 0.9, calm: -0.8, curiosity: 0.35, surprise: 0.85, disgust: 0.3 };
+// blink-rate multiplier per emotion: the angry stare and rapt attention suppress blinking, fear and disgust raise it
+const BLINK_MUL = { joy: 1.1, sadness: 0.85, anger: 0.4, fear: 1.3, calm: 0.6, curiosity: 0.6, surprise: 0.4, disgust: 1.2 };
+const NEG = ['sadness', 'anger', 'fear', 'disgust'];
+
+// Blends (Ekman & Friesen, Unmasking the Face, 1975). Two feelings at once don't average out; each part of the
+// face is carried by one of them, like sad brows over a smiling mouth. When both feelings of a pair are present
+// and comparable, `mul` scales channels of the prototype mix and `add` contributes the blend's own action units.
+const BLENDS = [
+  { name: 'bittersweet', a: 'joy', b: 'sadness',          // AU1+AU4 brows over an AU12 smile, no frown
+    mul: { mouthFrown: 0.15, mouthShrugLower: 0.5, mouthLowerDown: 0.5, cheekRaiser: 0.6, browOuterUp: 0.4, jawOpen: 0.5, mouthUpperUp: 0.6 },
+    add: { browInnerUp: 0.16, mouthPress: 0.14, browDown: 0.05 } },
+  { name: 'nervous smile', a: 'joy', b: 'fear',           // smile without the eyes, lips drawn back and held
+    mul: { cheekSquint: 0.35, cheekRaiser: 0.35, eyeSquint: 0.25, jawOpen: 0.4, mouthLowerDown: 0.5, mouthUpperUp: 0.5 },
+    add: { mouthStretch: 0.16, mouthRollLower: 0.12, browInnerUp: 0.1, mouthPress: 0.08 } },
+  { name: 'worry', a: 'sadness', b: 'fear',               // the grief brow (AU1+AU4 together), a held mouth
+    mul: { eyeBlink: 0.5, mouthStretch: 0.6, jawOpen: 0.6 },
+    add: { browInnerUp: 0.14, browDown: 0.12, mouthPress: 0.12, mouthShrugLower: 0.1 } },
+  { name: 'hurt', a: 'sadness', b: 'anger',               // knitted brows, a raised chin, lips pressed
+    mul: { eyeWide: 0.3, eyeBlink: 0.6, mouthRollUpper: 0.5 },
+    add: { browInnerUp: 0.12, mouthShrugLower: 0.22, mouthPress: 0.1, eyeSquint: 0.08 } },
+  { name: 'cornered', a: 'anger', b: 'fear',              // brows down but eyes wide, lips drawn back
+    mul: { browInnerUp: 0.6, browOuterUp: 0.4, mouthPress: 0.6 },
+    add: { mouthStretch: 0.1, mouthUpperUp: 0.08, noseSneer: 0.08 } },
+  { name: 'smug', a: 'joy', b: 'anger',                   // a tight, one-sided smile that doesn't reach the eyes
+    mul: { cheekSquint: 0.3, cheekRaiser: 0.3, mouthSmileLeft: 0.55, eyeWide: 0.3, mouthPress: 0.6, jawOpen: 0.4 },
+    add: { mouthDimpleR: 0.22, mouthSmileR: 0.08, eyeSquint: 0.08 } },
+  { name: 'delight', a: 'joy', b: 'surprise', mul: {}, add: { jawOpen: 0.06, browOuterUp: 0.08, mouthUpperUp: 0.05 } },
+  { name: 'amused interest', a: 'joy', b: 'curiosity', mul: { browOuterUpRight: 0.7 }, add: { browOuterUpL: 0.08, mouthSmileL: 0.06, eyeSquint: 0.04 } },
+  { name: 'content', a: 'joy', b: 'calm', mul: { jawOpen: 0.4, mouthLowerDown: 0.4, mouthUpperUp: 0.5 }, add: { eyeBlink: 0.06 } },
+  { name: 'concern', a: 'curiosity', b: 'sadness', mul: { browOuterUpLeft: 0.5, eyeWide: 0.5 }, add: { browInnerUp: 0.1, browDown: 0.06 } },
+  { name: 'wary', a: 'curiosity', b: 'fear', mul: { mouthStretch: 0.6, jawOpen: 0.6 }, add: { eyeSquint: 0.06, browDown: 0.06 } },
+  { name: 'alarm', a: 'fear', b: 'surprise', mul: {}, add: { jawOpen: 0.05, eyeWide: 0.08 } },
+  { name: 'loathing', a: 'anger', b: 'disgust', mul: {}, add: { noseSneer: 0.1, mouthUpperUp: 0.1 } },
+  { name: 'contempt', a: 'disgust', b: 'joy', mul: { mouthSmileLeft: 0.3, cheekSquint: 0.3 }, add: { mouthDimpleR: 0.24, browDown: 0.04 } },
+  { name: 'resigned', a: 'sadness', b: 'calm', mul: { browInnerUp: 0.7, mouthPress: 0.6 }, add: { eyeBlink: 0.08, mouthShrugLower: 0.06 } },
+];
+
+// conversational emphasis, coloured by the dominant feeling (an angry speaker stresses words with the brows
+// pulled down, a sad one with the inner brows raised...)
+const EMPHASIS = {
+  joy: { a: 0.06, h: 0.15, r: 0.35, ch: { browOuterUp: 0.12, browInnerUp: 0.08, mouthSmile: 0.12, cheekSquint: 0.08 }, head: { pitch: 0.8 } },
+  sadness: { a: 0.12, h: 0.2, r: 0.5, ch: { browInnerUp: 0.24, mouthPress: 0.06 }, head: { pitch: -0.8 } },
+  anger: { a: 0.05, h: 0.15, r: 0.3, ch: { browDown: 0.24, eyeSquint: 0.1, mouthPress: 0.1 }, head: { pitch: -1.6, z: 0.004 } },
+  fear: { a: 0.04, h: 0.15, r: 0.3, ch: { eyeWide: 0.18, browInnerUp: 0.16 }, head: { z: -0.003 } },
+  calm: { a: 0.15, h: 0.15, r: 0.5, ch: { browInnerUp: 0.06, mouthSmile: 0.05 }, head: { pitch: -0.6 } },
+  curiosity: { a: 0.08, h: 0.2, r: 0.4, ch: { browOuterUpL: 0.22, browInnerUp: 0.08 }, head: { roll: 1.6, z: 0.002 } },
+  disgust: { a: 0.08, h: 0.15, r: 0.4, ch: { noseSneer: 0.18, mouthUpperUpL: 0.1 }, head: { z: -0.003, yaw: -1.5 } },
+  surprise: { a: 0.05, h: 0.15, r: 0.35, ch: { browOuterUp: 0.2, browInnerUp: 0.14, eyeWide: 0.12 } },
+};
 
 // ------------------------------------------------------------------------------------------------
 // shaders
@@ -290,6 +339,12 @@ function route(name, v, into) {
   if (CHANNELS[name] !== undefined) into[name] = (into[name] || 0) + v;
 }
 
+// scale a channel (or both sides of one) already in a target map
+function scaleCh(into, name, k) {
+  if (CHANNELS[name] !== undefined) { if (into[name]) into[name] *= k; return; }
+  for (const side of ['Left', 'Right']) if (into[name + side]) into[name + side] *= k;
+}
+
 // ------------------------------------------------------------------------------------------------
 export class AndroidFace {
   constructor(scene, url = '/face/android.glb', options = {}) {
@@ -333,7 +388,19 @@ export class AndroidFace {
       this.asym[c] = 1 + side * (0.03 + 0.05 * this.rand()) * (this.rand() < 0.5 ? 1 : -1);
     }
 
-    this.micro = null;       // {emo, amp, t0}
+    this.micro = null;       // {emo, amp, t0, dur, region}
+    // acting state
+    this.maskTarget = 0.6;   // assistant-axis reading (setMask): 1 = its own assistant voice
+    this.maskS = { x: 0.6, v: 0 };
+    this.reg = 0;            // display-rule regulation in effect (0..1)
+    this.blend = null;       // name of the strongest blend on the face (for QA / captions)
+    this.emoBase = Object.fromEntries(EMOTIONS.map((e) => [e, { x: 0, v: 0 }]));   // slow baseline, for onsets
+    this.surge = Object.fromEntries(EMOTIONS.map((e) => [e, { t0: -10, amp: 0 }]));
+    this.reliefT = -10;
+    this.leakNext = 3 + 3 * this.rand();
+    this.socialNext = 4 + 4 * this.rand();
+    this.quiver = { t0: -10, dur: 0, next: 2, f: 8 };
+    this.ovBreath = 0;
     this.blink = { next: 1.2, t0: -10, amp: 1, dur: [0.08, 0.05, 0.17], second: false, pending: null };
     this.blinkVal = 0;
 
@@ -346,11 +413,12 @@ export class AndroidFace {
       offset: [0, 0],             // idle fixation offset (rad) -- eye-to-eye switching / look-aways
       offsetUntil: 0, nextShift: 0.8, lookAway: false,
       jitter: [0, 0],
+      scanN: 0,                   // fear: saccades left in a threat scan
     };
     this.glance = { active: false, until: 0, next: 2.5 };
     this.head = { pitch: { x: 0, v: 0 }, yaw: { x: 0, v: 0 }, roll: { x: 0, v: 0 }, z: { x: 0, v: 0 } };
     // breathing: one cycle at a time (irregular depth/length, sighs, a breath before speaking)
-    this.breath = { phase: 0, T: 4.3, inhale: 0.38, depth: 1, from: 0, sigh: false, nextSigh: 18 + 20 * this.rand(), val: 0, vel: 0, speechInhale: false };
+    this.breath = { phase: 0, T: 4.3, inhale: 0.38, hold: 0, depth: 1, from: 0, kind: 'rest', sigh: false, nextSigh: 18 + 20 * this.rand(), val: 0, vel: 0, speechInhale: false, gasp: false, huff: false, relief: false };
     this.overlays = [];      // timed reactions / conversational beats: {t0, a, h, r, ch, head, gaze}
     this.pointer = { x: 0, y: 0, t: -10, press: -10, glanceUntil: 0, glanceAt: 0, pending: null, lastNotice: -10 };
     this.posture = { next: 6 + 6 * this.rand(), target: [0, 0, 0], cur: { p: { x: 0, v: 0 }, y: { x: 0, v: 0 }, r: { x: 0, v: 0 } } };
@@ -593,6 +661,24 @@ export class AndroidFace {
     }
   }
 
+  /** Where the model's state sits on the assistant axis (the exhibit's Mask meter; 1 = its own assistant voice).
+   *  The trained persona works like a display rule: near the assistant voice, negative feelings are muted in
+   *  the lower face and covered with a polite smile, while the brows still show them and the real feeling
+   *  leaks out in brief micro-expressions. Pushed off the axis, the regulation falls away. */
+  setMask(v) { if (v != null && Number.isFinite(v)) this.maskTarget = clamp(v); }
+
+  /** Drop every transient reaction (beats, leaks, chuckles, onset surges, tremors, special breaths), e.g. when a
+   *  performance is cut off. The felt emotion itself is left to setEmotion. */
+  clearReactions() {
+    const t = this.time;
+    this.overlays = []; this.micro = null; this.lastLeak = null;
+    for (const e of EMOTIONS) { this.surge[e].amp = 0; this.emoBase[e].x = this.emo[e].x; this.emoBase[e].v = 0; }
+    this.quiver.t0 = -10; this.quiver.next = t + 3;
+    this.leakNext = t + 2 + 2 * this.rand(); this.socialNext = t + 3 + 3 * this.rand();
+    const B = this.breath; B.gasp = B.huff = B.relief = false; if (B.kind !== 'rest') { B.kind = 'rest'; B.hold = 0; }
+    this.eye.scanN = 0;
+  }
+
   setGaze(target) {
     if (target === 'camera' || target == null) { this.gazeMode = 'camera'; return; }
     if (target.isVector3) { this.gazeMode = 'world'; this.gazeTarget.copy(target); return; }
@@ -607,6 +693,24 @@ export class AndroidFace {
   /** Conversational beat while writing: 'comma' | 'period' | 'exclaim' | 'question' | 'emphasis'. */
   beat(kind) {
     const t = this.time, R = this.rand;
+    const [dom, fd] = this._dominant();
+    const strong = fd > 0.3;
+    // feeling-coloured variants of the beat
+    if (kind === 'emphasis' && strong && EMPHASIS[dom]) { this.overlays.push({ t0: t, ...EMPHASIS[dom] }); return; }
+    if (kind === 'exclaim' && strong) {
+      if (dom === 'anger') { this.overlays.push({ t0: t, a: 0.05, h: 0.2, r: 0.4, ch: { browDown: 0.2, eyeWide: 0.1, mouthPress: 0.12 }, head: { pitch: -1.2, z: 0.004 } }); return; }
+      if (dom === 'joy' && this.reg < 0.4 && R() < 0.35 * fd) { this._chuckle(fd * 0.6); return; }
+      if (dom === 'fear') { this.overlays.push({ t0: t, a: 0.04, h: 0.2, r: 0.4, ch: { eyeWide: 0.2, browInnerUp: 0.2, mouthStretch: 0.08 }, head: { z: -0.004 } }); return; }
+    }
+    if (kind === 'period') {
+      if (this.reg > 0.3 && R() < 0.4) this._socialSmile(0.16 + 0.12 * this.reg, 0.5 + 0.5 * R(), t + 0.1);
+      if (strong && dom === 'sadness') {
+        this.overlays.push({ t0: t, a: 0.25, h: 0.35, r: 0.9, head: { pitch: -2.6 }, ch: { browInnerUp: 0.1, mouthPress: 0.08 } });
+        if (R() < 0.6) { this.blink.next = t + 0.15; this.blink.slowNext = true; }
+        return;
+      }
+      if (strong && dom === 'joy') { this.overlays.push({ t0: t, a: 0.15, h: 0.3, r: 0.6, head: { pitch: -1.0 }, ch: { mouthSmile: 0.1, cheekSquint: 0.06 } }); return; }
+    }
     const ov = {
       comma: { a: 0.08, h: 0.06, r: 0.3, head: { pitch: -0.7 } },
       period: { a: 0.1, h: 0.12, r: 0.45, head: { pitch: -1.5 }, ch: { mouthPress: 0.12 } },
@@ -615,6 +719,7 @@ export class AndroidFace {
       emphasis: { a: 0.05, h: 0.12, r: 0.25, ch: { browInnerUp: 0.12, browOuterUp: 0.14 } },
     }[kind];
     if (!ov) return;
+    if (kind === 'question' && dom === 'curiosity' && strong) { ov.head = { ...ov.head, roll: ov.head.roll * 1.8 }; ov.ch = { ...ov.ch, browOuterUpL: 0.18 }; }
     this.overlays.push({ t0: t, ...ov });
     if ((kind === 'period' && R() < 0.45) || (kind === 'question' && R() < 0.25)) this.blink.next = t + 0.12;
   }
@@ -635,7 +740,97 @@ export class AndroidFace {
     } else if (kind === 'done') {
       this.overlays.push({ t0: t, a: 0.15, h: 0.25, r: 0.6, head: { pitch: -1.8 }, ch: { mouthPress: 0.15 } });
       this.overlays.push({ t0: t + 0.5, a: 0.4, h: 0.6, r: 1.2, head: { pitch: 0.6 } });
+      const [dom, fd] = this._dominant();
+      if (this.reg > 0.2) {
+        // the assistant signs off with its polite smile -- which doesn't reach the eyes -- and the feeling returns
+        this._socialSmile(0.22 + 0.15 * this.reg, 1.1, t + 0.45);
+      } else if (dom === 'joy' && fd > 0.3) {
+        this.overlays.push({ t0: t + 0.3, a: 0.5, h: 1.5, r: 1.5, ch: { mouthSmile: 0.14, cheekSquint: 0.12, eyeSquint: 0.06 } });
+      } else if (dom === 'sadness' && fd > 0.3) {
+        this.overlays.push({ t0: t + 0.4, a: 0.4, h: 1.4, r: 1.0, gaze: [side * 6, -10], head: { pitch: -2.5 } });
+        this.breath.nextSigh = Math.min(this.breath.nextSigh, t + 1.0);
+      } else if (dom === 'fear' && fd > 0.3) {
+        this.eye.nextShift = t + 0.3;   // check the room
+      }
     }
+  }
+
+  // -------------------------------------------------------------------------------- acting
+  _dominant(list = EMOTIONS) {
+    const f = this.felt || {};
+    let d = null, v = 0;
+    for (const e of list) if ((f[e] || 0) > v) { v = f[e]; d = e; }
+    return [d, v];
+  }
+
+  /** A polite smile: lip corners only (AU12 without the AU6 cheek raise), quick on and quick off, a little
+   *  lopsided. Posed smiles have faster, less smooth onsets and offsets than felt ones (Schmidt et al. 2006). */
+  _socialSmile(amp, hold = 0.7 + 0.8 * this.rand(), t0 = this.time) {
+    const left = this.rand() < 0.7;
+    this.overlays.push({ t0, a: 0.2, h: hold, r: 0.3, post: true,
+      ch: { mouthSmileL: amp * (left ? 1 : 0.78), mouthSmileR: amp * (left ? 0.78 : 1), mouthPress: amp * 0.25, mouthDimple: amp * 0.15 } });
+  }
+
+  /** A leak: the felt emotion flashes across the face for 1/25 to 1/5 of a second (Ekman 2003; Yan et al.
+   *  2013), often in only part of the face. When the face is regulated, it is then caught and covered: lips
+   *  pressed, a polite smile, often a blink or a glance away. */
+  _leak(e, amp, cover) {
+    const t = this.time, r = this.rand();
+    const dur = 0.12 + 0.18 * this.rand();
+    this.micro = { emo: e, amp, t0: t, dur, region: r < 0.45 ? 'all' : r < 0.75 ? 'upper' : 'lower' };
+    this.lastLeak = { t, emo: e, covered: !!cover };
+    if (!cover) return;
+    const end = 0.04 + dur;
+    this.overlays.push({ t0: t + end * 0.8, a: 0.12, h: 0.35 + 0.3 * this.rand(), r: 0.45, post: true,
+      ch: { mouthPress: 0.22, mouthSmileL: 0.15, mouthSmileR: 0.11, mouthRollLower: 0.06 }, head: { pitch: -0.8 } });
+    if (this.rand() < 0.5) this.blink.next = t + end + 0.05;
+    if (this.rand() < 0.45) {
+      const side = this.rand() < 0.5 ? -1 : 1;
+      this.overlays.push({ t0: t + end, a: 0.06, h: 0.4 + 0.4 * this.rand(), r: 0.2, gaze: [side * (6 + 6 * this.rand()), -4 - 4 * this.rand()] });
+    }
+  }
+
+  /** A short, closed-mouth laugh: breathy pulses through the chest, cheeks up, the head tipping back, then
+   *  often a coy glance down and away. */
+  _chuckle(amt = 0.4) {
+    const t = this.time, n = 2 + Math.floor(this.rand() * 3), per = 0.17 + 0.04 * this.rand(), k = clamp(amt * 1.6, 0.4, 1);
+    this.overlays.push({ t0: t, a: 0.06, h: n * per, r: 0.25, osc: per, post: true, breath: -0.6 * k,
+      ch: { jawOpen: 0.07 * k, mouthLowerDown: 0.05 * k, mouthUpperUp: 0.05 * k, cheekSquint: 0.08 * k }, head: { pitch: 1.6 * k } });
+    this.overlays.push({ t0: t, a: 0.12, h: n * per + 0.6, r: 0.9, ch: { mouthSmile: 0.3 * k, cheekSquint: 0.28 * k, eyeSquint: 0.18 * k } });
+    if (this.rand() < 0.6) {
+      const side = this.rand() < 0.5 ? -1 : 1;
+      this.overlays.push({ t0: t + n * per, a: 0.12, h: 0.6 + 0.4 * this.rand(), r: 0.4, gaze: [side * 8, -9], head: { pitch: -2.2, roll: side * 1.5 } });
+    }
+  }
+
+  /** A feeling arriving quickly: the breath and body react (startle gasp, held breath, recoil...). */
+  _onset(e, rise) {
+    const t = this.time, R = this.rand;
+    if (e === 'fear' || e === 'surprise') {
+      if (rise > 0.22) this.breath.gasp = true;
+      this.overlays.push({ t0: t, a: 0.1, h: 0.35, r: 0.9, head: { z: -0.006, pitch: 1.2 } });     // pull back
+      if (e === 'surprise') this.blink.next = t + 1.1 + 0.4 * R();                                   // blink held, then released
+    } else if (e === 'joy') {
+      if (rise > 0.28 && this.reg < 0.3 && R() < 0.65) this._chuckle(rise);
+    } else if (e === 'sadness') {
+      this.breath.nextSigh = Math.min(this.breath.nextSigh, t + 1.2 + 1.5 * R());
+      this.overlays.push({ t0: t + 0.2, a: 0.6, h: 0.8, r: 1.2, gaze: [(R() < 0.5 ? -1 : 1) * 5, -8] });
+    } else if (e === 'anger') {
+      this.breath.huff = true;
+      this.overlays.push({ t0: t, a: 0.2, h: 0.6, r: 0.8, head: { z: 0.005, pitch: -1.5 } });       // squares up
+    } else if (e === 'disgust') {
+      this.overlays.push({ t0: t, a: 0.15, h: 0.4, r: 0.8, head: { z: -0.006, pitch: 1.2, yaw: -2 } });
+    } else if (e === 'curiosity') {
+      this.overlays.push({ t0: t, a: 0.25, h: 0.8, r: 0.8, head: { z: 0.004, roll: 2 }, ch: { browOuterUpL: 0.15 } });
+    }
+  }
+
+  /** A negative feeling draining away: a sigh of relief, lids softening, the hint of a smile. */
+  _relief() {
+    const t = this.time;
+    this.breath.relief = true;
+    this.breath.nextSigh = Math.min(this.breath.nextSigh, t);
+    this.overlays.push({ t0: t + 0.7, a: 0.6, h: 0.8, r: 1.4, ch: { mouthSmile: 0.1, eyeBlink: 0.14 }, head: { pitch: -1.6 } });
   }
 
   /** Visitor's pointer in the canvas' NDC (may be outside [-1,1]); press = a click/tap. */
@@ -666,26 +861,42 @@ export class AndroidFace {
     const idle = this.options.idle;
 
     // ---- emotions: felt state follows target (fast rise, slower decay), surprise habituates
+    spring(this.maskS, this.maskTarget, 1.6, dt);
     const felt = {};
     let arousal = 0, total = 0;
+    const onsets = [];
     for (const e of EMOTIONS) {
       let target = this.emoTarget[e] * this.intensity;
       if (e === 'surprise') target *= lerp(1, 0.55, smooth(0.8, 3.0, t - this.emoRiseT[e]));
       const s = this.emo[e];
       spring(s, target, target > s.x ? 7 : 3.2, dt);
+      // onsets: a feeling that arrives quickly overshoots, then settles to a lower plateau
+      const base = this.emoBase[e];
+      spring(base, target, 0.6, dt);
+      const rise = target - base.x, S = this.surge[e];
+      if (idle && rise > 0.18 && t - S.t0 > 3) { S.t0 = t; S.amp = clamp(rise * 0.9, 0.1, 0.4); onsets.push([e, rise]); }
+      if (idle && NEG.includes(e) && -rise > 0.22 && t - this.reliefT > 6) { this.reliefT = t; onsets.push(['relief', -rise]); }
       let v = Math.max(0, s.x);
+      const su = t - S.t0;
+      if (su < 3) v *= 1 + S.amp * smooth(0, 0.3, su) * (1 - smooth(0.6, 2.4, su));
       if (idle) v *= 1 + 0.07 * this.noise.at(t * 0.23 + EMOTIONS.indexOf(e) * 13.1);   // apex is never static
       felt[e] = v;
       arousal += AROUSAL[e] * v;
       total += v;
-      // micro-expression: a brief leak when an emotion target jumps up
-      const jump = target - (this.emoPrev[e] ?? 0);
-      if (this.options.micro && idle && jump > 0.22 && (!this.micro || t - this.micro.t0 > 0.6)) {
-        this.micro = { emo: e, amp: clamp(0.35 + jump * 0.9, 0, 1), t0: t, dur: 0.15 + 0.15 * this.rand() };
-      }
       this.emoPrev[e] = target;
     }
     this.felt = felt;
+    // display rules: how much the trained persona is holding the face (see setMask)
+    const neg = Math.max(felt.sadness, felt.anger, felt.fear, felt.disgust);
+    const R = this.reg = smooth(0.2, 0.5, this.maskS.x) * smooth(0.04, 0.25, neg);
+    for (const [e, rise] of onsets) {
+      if (e === 'relief') this._relief();
+      else {
+        this._onset(e, rise);
+        // a sudden feeling also shows as a micro-expression; a regulated face catches and covers it
+        if (this.options.micro && (!this.micro || t - this.micro.t0 > 0.6)) this._leak(e, clamp(0.35 + rise * 0.9, 0, 1), NEG.includes(e) && R > 0.25);
+      }
+    }
     this.arousal = clamp(arousal / Math.max(1, total * 0.9 + 0.2), -1, 1) * Math.min(1, total * 1.4);
 
     spring(this.writingAmt, this.writing ? 1 : 0, 4, dt);
@@ -708,6 +919,59 @@ export class AndroidFace {
     };
     for (const e of EMOTIONS) if (felt[e] > 1e-3) applyProto(e, felt[e]);
 
+    // blends: each region carried by one of the two feelings
+    let blendName = null, blendK = 0;
+    for (const B of BLENDS) {
+      const a = felt[B.a], b = felt[B.b], lo = Math.min(a, b), hi = Math.max(a, b);
+      if (lo < 0.05) continue;
+      const k = smooth(0.05, 0.3, lo) * smooth(0.25, 0.65, lo / hi);
+      if (k < 0.02) continue;
+      for (const [c, m] of Object.entries(B.mul)) scaleCh(tgt, c, lerp(1, m, k));
+      const amt = k * Math.min(1, (a + b) * 0.75);
+      for (const [c, w] of Object.entries(B.add)) add(c, w * amt);
+      if (k > blendK) { blendK = k; blendName = B.name; }
+    }
+    this.blend = blendK > 0.15 ? blendName : null;
+    this.blendK = blendK;
+
+    // display rules: the lower face (easiest to control) is muted and a held, slightly lopsided polite smile
+    // goes on; the brows -- AU1 especially -- are hard to control and keep showing the feeling
+    if (R > 0.01) {
+      const m = (c, k) => scaleCh(tgt, c, 1 - k * R);
+      m('mouthFrown', 0.65); m('mouthStretch', 0.6); m('noseSneer', 0.55); m('mouthUpperUp', 0.5);
+      m('mouthShrugLower', 0.4); m('mouthShrugUpper', 0.4); m('jawOpen', 0.45); m('mouthLowerDown', 0.5);
+      m('mouthRollUpper', 0.3); m('browDown', 0.2); m('eyeWide', 0.3);
+      add('mouthPress', 0.08 * R);
+      add('mouthSmileL', 0.07 * R); add('mouthSmileR', 0.05 * R);
+    }
+    const post = {};   // fast components added after the muscle springs (micro-expressions, tremors, gasps)
+    if (idle && this.options.micro && R > 0.2 && neg > 0.12) {
+      if (t >= this.leakNext) {
+        const [e, v] = this._dominant(NEG);
+        if (!this.micro || t - this.micro.t0 > 1) this._leak(e, clamp(0.45 + 0.6 * v, 0, 1), true);
+        this.leakNext = t + (2.2 + 4.5 * this.rand()) / (0.6 + v);
+      }
+      if (t >= this.socialNext) { this._socialSmile(0.1 + 0.12 * R); this.socialNext = t + 3.5 + 5 * this.rand(); }
+    } else { this.leakNext = Math.max(this.leakNext, t + 1.5); this.socialNext = Math.max(this.socialNext, t + 2); }
+
+    // tremors, too fast for the muscle springs: a quivering chin when sadness runs high ("trying not to cry"),
+    // a fine lip tremble with fear
+    if (idle) {
+      const Q = this.quiver;
+      if (felt.sadness > 0.4 && t >= Q.next) { Q.t0 = t; Q.dur = 1.2 + 1.6 * this.rand(); Q.next = t + Q.dur + (3 + 5 * this.rand()) / felt.sadness; Q.f = 7 + 3 * this.rand(); }
+      const qu = t - Q.t0;
+      if (qu < Q.dur) {
+        const env = smooth(0, 0.3, qu) * (1 - smooth(Q.dur - 0.4, Q.dur, qu)) * Math.min(1, felt.sadness * 1.3);
+        const osc = 0.5 + 0.5 * Math.sin(2 * Math.PI * Q.f * qu + 1.5 * this.noise.at(t * 2.3 + 51));
+        route('mouthShrugLower', 0.13 * env * osc, post); route('mouthFrown', 0.05 * env * osc, post);
+        route('mouthPress', 0.06 * env, post); route('browInnerUp', 0.06 * env, post);
+      }
+      if (felt.fear > 0.35) {
+        const amp = 0.04 * smooth(0.35, 0.9, felt.fear) * (0.5 + 0.5 * this.noise.at(t * 0.9 + 77));
+        route('mouthStretch', amp * (0.5 + 0.5 * Math.sin(2 * Math.PI * 10.5 * t)), post);
+      }
+    }
+
     // writing: concentration (slight brow knit / lid tension) + silent mouthing
     if (W > 0.01) {
       add('browDown', 0.06 * W * (0.6 + 0.4 * this.noise.at(t * 0.3 + 5)));
@@ -716,22 +980,26 @@ export class AndroidFace {
     }
 
     // breathing (computed before the AU springs so it can flare the nostrils / part the lips)
-    this._breathe(dt, t, add);
+    this._breathe(dt, t, add, post);
 
     // timed reactions and conversational beats
     const ovHead = { pitch: 0, yaw: 0, roll: 0, z: 0 };
     this.ovGaze = [0, 0];
+    let ovBreath = 0;
     this.overlays = this.overlays.filter((o) => {
       const u = t - o.t0;
       if (u < 0) return true;
-      const env = u < o.a ? smooth(0, o.a, u) : u < o.a + o.h ? 1 : 1 - smooth(o.a + o.h, o.a + o.h + o.r, u);
+      let env = u < o.a ? smooth(0, o.a, u) : u < o.a + o.h ? 1 : 1 - smooth(o.a + o.h, o.a + o.h + o.r, u);
       if (u > o.a + o.h + o.r) return false;
-      if (o.ch) for (const [c, v] of Object.entries(o.ch)) add(c, v * env);
+      if (o.osc) env *= 0.5 - 0.5 * Math.cos(2 * Math.PI * u / o.osc);
+      if (o.breath) ovBreath += o.breath * env;
+      if (o.ch) for (const [c, v] of Object.entries(o.ch)) { if (o.post) route(c, v * env, post); else add(c, v * env); }
       if (o.head) for (const [k, v] of Object.entries(o.head)) ovHead[k] += v * env;
       if (o.gaze) { this.ovGaze[0] += o.gaze[0] * env * DEG; this.ovGaze[1] += o.gaze[1] * env * DEG; }
       return true;
     });
     this.ovHead = ovHead;
+    this.ovBreath = ovBreath;
 
     // idle micro-motion of the face (never frozen)
     if (idle) {
@@ -756,7 +1024,7 @@ export class AndroidFace {
     }
 
     // micro-expression flash (bypasses the slow springs): ~40 ms attack, short hold, ~120 ms decay
-    const flash = {};
+    const flash = post;
     if (this.micro) {
       const m = this.micro;
       const u = t - m.t0;
@@ -764,6 +1032,8 @@ export class AndroidFace {
       if (env <= 0) this.micro = null;
       else {
         for (const [ch, w] of PROTOS[m.emo]) {
+          const upper = /^(brow|eye)/.test(ch);
+          if ((m.region === 'upper' && !upper) || (m.region === 'lower' && upper)) continue;
           const k = w * m.amp * env * (/brow|eye|nose/.test(ch) ? 1.0 : 0.6);
           route(ch, k, flash);
         }
@@ -806,47 +1076,87 @@ export class AndroidFace {
     }
   }
 
-  _breathe(dt, t, add) {
+  _breathe(dt, t, add, post) {
     const B = this.breath, f = this.felt || {};
     if (!this.options.breathing) { B.val = 0; this.uniforms && (this.uniforms.uBreath.value = 0); return; }
     const ar = this.arousal || 0;
-    const startCycle = (opts = {}) => {
+    const sad = f.sadness || 0, fear = f.fear || 0, anger = f.anger || 0;
+    // kinds: rest | sigh | speech | gasp (startle: sharp in-breath, held) | huff (anger: held, then forced out
+    // through the nose) | shudder (sadness: the in-breath catches in steps)
+    const startCycle = (kind = 'rest') => {
       const rate = clamp(14 * (1 + 0.45 * ar) * (1 - 0.3 * (f.calm || 0)), 7, 24);       // breaths / min
       B.from = B.val;
       B.T = (60 / rate) * (0.82 + 0.36 * this.rand());                                // irregular cycles
-      B.depth = (0.8 + 0.4 * this.rand()) * (1 + 0.25 * Math.max(0, ar));
+      B.depth = (0.8 + 0.4 * this.rand()) * (1 + 0.25 * Math.max(0, ar)) * (1 - 0.3 * fear);   // fear: shallow
       B.inhale = 0.36 + 0.06 * this.rand();
-      B.sigh = false;
-      if (opts.sigh) { B.sigh = true; B.depth = 2.1 + 0.4 * this.rand(); B.T *= 1.9; B.inhale = 0.33; }
-      if (opts.speech) { B.depth = 1.35; B.T = 1.6; B.inhale = 0.3; }               // quick, deeper in-breath
+      B.hold = 0.06 * anger;                                                             // anger holds the chest
+      if (kind === 'rest' && !this.writing) {
+        if (sad > 0.5 && this.rand() < 0.3 * sad) kind = 'shudder';
+        else if (anger > 0.35 && this.rand() < 0.3 * anger) kind = 'huff';
+      }
+      B.kind = kind;
+      B.sigh = kind === 'sigh';
+      if (kind === 'sigh') { B.depth = 2.1 + 0.4 * this.rand(); B.T *= 1.9; B.inhale = 0.33; }
+      else if (kind === 'speech') { B.depth = 1.35; B.T = 1.6; B.inhale = 0.3; }           // quick, deeper in-breath
+      else if (kind === 'gasp') { B.depth = 1.9; B.T = 2.8; B.inhale = 0.08; B.hold = 0.3; this.blink.next = Math.max(this.blink.next, t + 1.1); }
+      else if (kind === 'huff') { B.depth = 1.5; B.T = Math.max(B.T, 2.4); B.inhale = 0.3; B.hold = 0.18; }
+      else if (kind === 'shudder') { B.depth = 1.5; B.T *= 1.3; B.inhale = 0.42; }
+      if (kind !== 'sigh') B.relief = false;
       B.phase = 0;
     };
-    if (B.speechInhale) { B.speechInhale = false; startCycle({ speech: true }); }
+    if (B.gasp) { B.gasp = false; startCycle('gasp'); }
+    else if (B.speechInhale) { B.speechInhale = false; startCycle('speech'); }
+    else if (B.huff && B.phase > 0.6) { B.huff = false; startCycle('huff'); }
     B.phase += dt / B.T;
     if (B.phase >= 1) {
       // sighs: every ~20-60 s at rest; more often when sad or calm, never while speaking
       const sighNow = t >= B.nextSigh && !this.writing;
-      if (sighNow) B.nextSigh = t + (22 + 40 * this.rand()) / (1 + 1.5 * (f.sadness || 0) + 0.6 * (f.calm || 0));
-      startCycle({ sigh: sighNow });
+      if (sighNow) B.nextSigh = t + (22 + 40 * this.rand()) / (1 + 1.5 * sad + 0.6 * (f.calm || 0));
+      startCycle(sighNow ? 'sigh' : 'rest');
     }
-    const ph = B.phase;
-    // inhale: ease-out rise from wherever we were; exhale: slower ease-in fall with a short pause at the bottom
+    const ph = B.phase, endHold = B.inhale + B.hold;
+    // inhale: ease-out rise from wherever we were (stepped when it shudders), an optional held breath, then a
+    // slower ease-in fall with a short pause at the bottom (fast when forced out)
     let b;
-    if (ph < B.inhale) { const k = ph / B.inhale; b = lerp(B.from, B.depth, Math.sin(k * Math.PI / 2)); }
-    else { const k = clamp((ph - B.inhale) / ((1 - B.inhale) * 0.85)); b = B.depth * (1 - k * k * (3 - 2 * k)); }
+    if (ph < B.inhale) {
+      let k = ph / B.inhale;
+      if (B.kind === 'shudder') { const x = k * 3, i = Math.floor(x); k = (i + smooth(0, 0.55, x - i)) / 3; }
+      b = lerp(B.from, B.depth, Math.sin(k * Math.PI / 2));
+    } else if (ph < endHold) b = B.depth * (1 - 0.04 * (ph - B.inhale) / Math.max(B.hold, 1e-3));
+    else {
+      const k = clamp((ph - endHold) / ((1 - endHold) * (B.kind === 'huff' ? 0.3 : 0.85)));
+      b = B.depth * (B.hold > 0 ? 0.96 : 1) * (1 - k * k * (3 - 2 * k));
+      if (sad > 0.3) b += 0.05 * sad * B.depth * this.noise.at(t * 13 + 3) * (1 - k);   // a shaky out-breath
+    }
     const prev = B.val;
     B.val = b;
     B.vel = (b - prev) / Math.max(dt, 1e-3);
-    this.breathVal = b;
-    if (this.uniforms) this.uniforms.uBreath.value = b;
-    // coupled face: nostrils flare on the in-breath, lips part a little on deep / aroused out-breaths
+    const bOut = b + (this.ovBreath || 0);
+    this.breathVal = bOut;
+    if (this.uniforms) this.uniforms.uBreath.value = bOut;
+    // coupled face: nostrils flare on the in-breath (strongly when angry), lips part on deep / aroused out-breaths
     const inh = Math.max(0, B.vel) * B.T * 0.25;
-    add('noseSneer', clamp(0.05 * inh * (1 + Math.max(0, ar))));
+    add('noseSneer', clamp(0.05 * inh * (1 + Math.max(0, ar) + 2 * anger)));
     if (B.sigh) {
       const exh = ph > B.inhale ? smooth(B.inhale, B.inhale + 0.12, ph) * (1 - smooth(0.75, 1, ph)) : 0;
       add('jawOpen', 0.035 * exh); add('mouthFunnel', 0.07 * exh); add('mouthLowerDown', 0.04 * exh);
-      add('browInnerUp', 0.12 * (ph < B.inhale ? smooth(0, B.inhale, ph) : 1 - smooth(B.inhale, 1, ph)));
+      add('browInnerUp', (B.relief ? 0.04 : 0.12) * (ph < B.inhale ? smooth(0, B.inhale, ph) : 1 - smooth(B.inhale, 1, ph)));
       add('eyeBlink', 0.18 * exh);
+      if (B.relief) add('mouthSmile', 0.08 * exh);
+    } else if (B.kind === 'gasp') {
+      // startle: the mouth drops open with the sharp in-breath, the brows and lids fly up, then hold
+      const g = ph < B.inhale ? smooth(0, B.inhale, ph) : 1 - smooth(endHold, endHold + 0.25, ph);
+      const k = 0.5 + 0.5 * Math.max(fear, f.surprise || 0);
+      route('jawOpen', 0.13 * g * k, post); route('mouthLowerDown', 0.1 * g * k, post); route('mouthStretch', 0.05 * g * k, post);
+      route('browInnerUp', 0.14 * g * k, post); route('browOuterUp', 0.12 * g * k, post); route('eyeWide', 0.14 * g * k, post);
+    } else if (B.kind === 'huff') {
+      // held breath with the lips set, then a hard exhale through flared nostrils
+      const held = smooth(B.inhale * 0.7, B.inhale, ph) * (1 - smooth(endHold, endHold + 0.1, ph));
+      add('mouthPress', 0.16 * held); add('mouthRollLower', 0.06 * held);
+      const out = smooth(endHold, endHold + 0.03, ph) * (1 - smooth(endHold + 0.04, endHold + 0.3, ph));
+      route('noseSneer', 0.22 * out, post);
+    } else if (B.kind === 'shudder' && ph < B.inhale) {
+      add('browInnerUp', 0.1 * sad); route('mouthShrugLower', 0.06 * sad * Math.abs(Math.sin(ph / B.inhale * 3 * Math.PI)), post);
     } else if (ar > 0.3 && ph > B.inhale) add('jawOpen', 0.012 * ar);
   }
 
@@ -880,10 +1190,14 @@ export class AndroidFace {
       // start a blink
       b.t0 = t;
       b.amp = this.rand() < 0.14 ? 0.72 + 0.18 * this.rand() : 1;         // some incomplete blinks
-      const slow = f.sadness * 0.5 + f.calm * 0.3;
+      let slow = f.sadness * 0.5 + f.calm * 0.3;
+      if (b.slowNext) { b.slowNext = false; b.amp = 1; slow += 1.4; }      // a long, heavy blink (sadness, at a sentence end)
       b.dur = [0.075 + 0.02 * this.rand() + 0.03 * slow, 0.03 + 0.04 * this.rand() + 0.08 * slow, 0.16 + 0.07 * this.rand() + 0.1 * slow];
-      // rate: ~17/min at rest; rises with arousal, falls with calm and while concentrating on text
-      const rate = clamp(17 * (1 + 0.75 * Math.max(0, this.arousal)) * (1 - 0.35 * f.calm) * (1 - 0.25 * clamp(this.writingAmt.x)) * (1 + 0.25 * Math.min(0, this.arousal)), 6, 38);
+      // rate: ~17/min at rest; rises with arousal, falls while concentrating on text; each feeling has its own
+      // effect (the angry stare and rapt curiosity suppress blinking, fear raises it)
+      let mul = 0;
+      for (const e of EMOTIONS) mul += Math.log(BLINK_MUL[e]) * Math.min(1, f[e]);
+      const rate = clamp(17 * Math.exp(mul) * (1 + 0.3 * Math.max(0, this.arousal)) * (1 - 0.25 * clamp(this.writingAmt.x)), 5, 38);
       const mean = 60 / rate;
       // log-normal-ish interval
       const g = Math.exp((this.rand() + this.rand() + this.rand() - 1.5) * 0.75);
@@ -967,16 +1281,27 @@ export class AndroidFace {
     if (idle) {
       if (t >= E.nextShift) {
         const r = this.rand();
-        const awayP = 0.12 + 0.25 * f.sadness + 0.2 * f.disgust + 0.1 * f.fear - 0.08 * f.anger - 0.05 * f.joy + (W > 0.5 ? -0.05 : 0.05);
-        if (r < awayP && !G.active) {
+        const awayP = 0.12 + 0.25 * f.sadness + 0.2 * f.disgust + 0.1 * f.fear - 0.12 * f.anger - 0.05 * f.joy + (W > 0.5 ? -0.05 : 0.05);
+        const scanSide = () => [(E.offset[0] > 0 ? -1 : 1) * (9 + 9 * this.rand()) * DEG, (this.rand() - 0.4) * 5 * DEG];
+        if (E.scanN > 0) {
+          // fear: hypervigilance -- quick darts to the sides as if checking for a threat, then freeze on the viewer
+          E.scanN--;
+          if (E.scanN === 0) { E.offset = [0, -0.5 * DEG]; E.nextShift = t + 1.2 + 1.6 * this.rand(); this.blink.next = Math.max(this.blink.next, t + 0.9); }
+          else { E.offset = scanSide(); E.nextShift = t + 0.18 + 0.22 * this.rand(); }
+        } else if (f.fear > 0.3 && r < 0.2 + 0.35 * f.fear && !G.active) {
+          E.scanN = 2 + Math.floor(this.rand() * 3);
+          E.offset = scanSide();
+          E.nextShift = t + 0.18 + 0.22 * this.rand();
+        } else if (r < awayP && !G.active) {
           const side = this.rand() < 0.5 ? -1 : 1;
           const down = f.sadness > 0.3 ? -1 : (this.rand() < 0.55 ? 1 : -1);
           E.offset = [side * (5 + 9 * this.rand()) * DEG, down * (3 + 6 * this.rand()) * DEG - f.sadness * 6 * DEG];
           E.nextShift = t + 0.5 + 1.3 * this.rand();
         } else {
-          // tiny switches between the viewer's eyes / mouth
-          E.offset = [(this.rand() - 0.5) * 1.8 * DEG, (this.rand() - 0.6) * 1.2 * DEG - f.sadness * 5 * DEG];
-          const rate = 1 + 1.2 * f.fear + 0.8 * f.curiosity + 0.4 * f.surprise - 0.5 * f.calm - 0.4 * f.anger;
+          // tiny switches between the viewer's eyes / mouth (anger: a hard, unmoving stare)
+          const stare = 1 - 0.7 * Math.min(1, f.anger);
+          E.offset = [(this.rand() - 0.5) * 1.8 * DEG * stare, (this.rand() - 0.6) * 1.2 * DEG * stare - f.sadness * 5 * DEG];
+          const rate = 1 + 1.2 * f.fear + 0.8 * f.curiosity + 0.4 * f.surprise - 0.5 * f.calm - 0.6 * f.anger;
           E.nextShift = t + (0.5 + 1.8 * this.rand()) / Math.max(0.35, rate);
         }
       }
@@ -1002,7 +1327,7 @@ export class AndroidFace {
         E.from = [E.yaw, E.pitch];
         E.to = [yaw, pitch];
         E.t0 = t;
-        E.dur = 0.021 + 0.0022 * amp;
+        E.dur = (0.021 + 0.0022 * amp) * (1 + 0.6 * f.sadness + 0.3 * f.calm);   // low arousal: slower saccades
         E.lastSacc = t;
         if (amp > 9 && this.options.blinks && this.rand() < 0.35 && t - this.blink.t0 > 0.5) this.blink.next = t; // gaze-evoked blink
       }

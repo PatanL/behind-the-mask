@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const errs = []; page.on('pageerror', (e) => errs.push(e.message));
-await page.goto('http://127.0.0.1:5190/?data=performances9&q=do-you-have-feelings&e=unmask&l=lot&autoplay=1&fast=1');
+await page.goto('http://127.0.0.1:5190/?q=do-you-have-feelings&e=unmask&l=lot&autoplay=1&fast=1');
 await page.waitForFunction(() => window.__btm && window.__btm.state.doc && !window.__btm.state.playing, null, { timeout: 120000 });
 await page.waitForTimeout(800);
 await page.locator('#share').click();

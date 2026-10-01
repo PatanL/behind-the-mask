@@ -1,6 +1,6 @@
 // Pre-computed performances (see server/precompute.py). Each one holds four streams token by token.
 const cache = new Map();
-// ?data=performances9 lets a new data set be previewed before it replaces the live one
+//  lets a new data set be previewed before it replaces the live one
 const DATA = new URLSearchParams(location.search).get('data') || 'performances';
 let indexPromise = null;
 export function loadIndex() {

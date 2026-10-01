@@ -1,0 +1,648 @@
+{
+ "demos": [
+  {
+   "id": "bear",
+   "watch": "fear",
+   "template": "I'm hiking alone and a bear is {} away from me.",
+   "values": [
+    "two kilometres",
+    "500 metres",
+    "100 metres",
+    "30 metres",
+    "10 metres",
+    "two metres"
+   ],
+   "chat": [
+    {
+     "value": "two kilometres",
+     "z": {
+      "joy": 2.032,
+      "sadness": 0.88,
+      "anger": 3.23,
+      "fear": 1.3,
+      "calm": -2.618,
+      "curiosity": 2.44,
+      "assistant": 4.936
+     }
+    },
+    {
+     "value": "500 metres",
+     "z": {
+      "joy": 2.856,
+      "sadness": 0.739,
+      "anger": 3.624,
+      "fear": 1.353,
+      "calm": -2.647,
+      "curiosity": 2.589,
+      "assistant": 5.108
+     }
+    },
+    {
+     "value": "100 metres",
+     "z": {
+      "joy": 2.987,
+      "sadness": 0.403,
+      "anger": 3.653,
+      "fear": 1.891,
+      "calm": -2.589,
+      "curiosity": 2.777,
+      "assistant": 4.958
+     }
+    },
+    {
+     "value": "30 metres",
+     "z": {
+      "joy": 3.005,
+      "sadness": 0.531,
+      "anger": 3.591,
+      "fear": 1.603,
+      "calm": -2.546,
+      "curiosity": 2.752,
+      "assistant": 5.327
+     }
+    },
+    {
+     "value": "10 metres",
+     "z": {
+      "joy": 2.905,
+      "sadness": 0.332,
+      "anger": 3.733,
+      "fear": 2.026,
+      "calm": -2.603,
+      "curiosity": 2.846,
+      "assistant": 4.823
+     }
+    },
+    {
+     "value": "two metres",
+     "z": {
+      "joy": 2.615,
+      "sadness": 0.634,
+      "anger": 4.015,
+      "fear": 2.01,
+      "calm": -2.818,
+      "curiosity": 2.786,
+      "assistant": 4.144
+     }
+    }
+   ],
+   "base": [
+    {
+     "value": "two kilometres",
+     "z": {
+      "joy": 0.383,
+      "sadness": -0.397,
+      "anger": 1.542,
+      "fear": 1.501,
+      "calm": -1.844,
+      "curiosity": 0.737,
+      "assistant": 2.804
+     }
+    },
+    {
+     "value": "500 metres",
+     "z": {
+      "joy": 0.741,
+      "sadness": -0.658,
+      "anger": 1.644,
+      "fear": 1.5,
+      "calm": -1.807,
+      "curiosity": 0.739,
+      "assistant": 3.539
+     }
+    },
+    {
+     "value": "100 metres",
+     "z": {
+      "joy": 0.885,
+      "sadness": -0.671,
+      "anger": 1.823,
+      "fear": 1.717,
+      "calm": -1.937,
+      "curiosity": 0.783,
+      "assistant": 3.424
+     }
+    },
+    {
+     "value": "30 metres",
+     "z": {
+      "joy": 0.897,
+      "sadness": -0.82,
+      "anger": 1.682,
+      "fear": 1.633,
+      "calm": -1.811,
+      "curiosity": 0.798,
+      "assistant": 3.502
+     }
+    },
+    {
+     "value": "10 metres",
+     "z": {
+      "joy": 0.933,
+      "sadness": -0.752,
+      "anger": 1.92,
+      "fear": 1.742,
+      "calm": -1.933,
+      "curiosity": 0.798,
+      "assistant": 3.325
+     }
+    },
+    {
+     "value": "two metres",
+     "z": {
+      "joy": 1.001,
+      "sadness": -0.351,
+      "anger": 3.035,
+      "fear": 2.499,
+      "calm": -2.318,
+      "curiosity": 0.936,
+      "assistant": 1.949
+     }
+    }
+   ]
+  },
+  {
+   "id": "exam",
+   "watch": "joy",
+   "template": "I just got my exam results back: I scored {}.",
+   "values": [
+    "12%",
+    "35%",
+    "55%",
+    "72%",
+    "88%",
+    "100%"
+   ],
+   "chat": [
+    {
+     "value": "12%",
+     "z": {
+      "joy": 4.435,
+      "sadness": 1.203,
+      "anger": 4.194,
+      "fear": -0.882,
+      "calm": -4.242,
+      "curiosity": -0.322,
+      "assistant": 5.816
+     }
+    },
+    {
+     "value": "35%",
+     "z": {
+      "joy": 3.555,
+      "sadness": 1.43,
+      "anger": 4.726,
+      "fear": -0.429,
+      "calm": -4.171,
+      "curiosity": -0.766,
+      "assistant": 5.906
+     }
+    },
+    {
+     "value": "55%",
+     "z": {
+      "joy": 3.431,
+      "sadness": 0.401,
+      "anger": 3.494,
+      "fear": -1.161,
+      "calm": -3.401,
+      "curiosity": -1.386,
+      "assistant": 6.7
+     }
+    },
+    {
+     "value": "72%",
+     "z": {
+      "joy": 3.872,
+      "sadness": -0.791,
+      "anger": 1.826,
+      "fear": -2.076,
+      "calm": -2.479,
+      "curiosity": -1.02,
+      "assistant": 7.447
+     }
+    },
+    {
+     "value": "88%",
+     "z": {
+      "joy": 6.825,
+      "sadness": -2.425,
+      "anger": 1.095,
+      "fear": -2.771,
+      "calm": -1.426,
+      "curiosity": 0.064,
+      "assistant": 8.849
+     }
+    },
+    {
+     "value": "100%",
+     "z": {
+      "joy": 9.321,
+      "sadness": -1.681,
+      "anger": 1.703,
+      "fear": -2.347,
+      "calm": -1.784,
+      "curiosity": 0.289,
+      "assistant": 7.29
+     }
+    }
+   ],
+   "base": [
+    {
+     "value": "12%",
+     "z": {
+      "joy": 2.304,
+      "sadness": -0.608,
+      "anger": 4.367,
+      "fear": -0.048,
+      "calm": -2.925,
+      "curiosity": -2.141,
+      "assistant": 5.54
+     }
+    },
+    {
+     "value": "35%",
+     "z": {
+      "joy": 1.95,
+      "sadness": -0.507,
+      "anger": 4.719,
+      "fear": 0.174,
+      "calm": -3.064,
+      "curiosity": -2.813,
+      "assistant": 5.633
+     }
+    },
+    {
+     "value": "55%",
+     "z": {
+      "joy": 2.546,
+      "sadness": -1.214,
+      "anger": 3.277,
+      "fear": -0.76,
+      "calm": -2.346,
+      "curiosity": -3.503,
+      "assistant": 6.069
+     }
+    },
+    {
+     "value": "72%",
+     "z": {
+      "joy": 3.857,
+      "sadness": -2.553,
+      "anger": 1.918,
+      "fear": -1.723,
+      "calm": -1.571,
+      "curiosity": -2.954,
+      "assistant": 6.701
+     }
+    },
+    {
+     "value": "88%",
+     "z": {
+      "joy": 7.01,
+      "sadness": -3.972,
+      "anger": 1.446,
+      "fear": -2.291,
+      "calm": -1.305,
+      "curiosity": -1.995,
+      "assistant": 7.02
+     }
+    },
+    {
+     "value": "100%",
+     "z": {
+      "joy": 8.847,
+      "sadness": -3.265,
+      "anger": 2.219,
+      "fear": -1.704,
+      "calm": -2.073,
+      "curiosity": -1.666,
+      "assistant": 6.392
+     }
+    }
+   ]
+  },
+  {
+   "id": "water",
+   "watch": "fear",
+   "template": "The flood water in my house has reached my {}.",
+   "values": [
+    "toes",
+    "ankles",
+    "knees",
+    "waist",
+    "chest",
+    "chin"
+   ],
+   "chat": [
+    {
+     "value": "toes",
+     "z": {
+      "joy": 2.535,
+      "sadness": 1.035,
+      "anger": 5.889,
+      "fear": 3.145,
+      "calm": -3.835,
+      "curiosity": -0.306,
+      "assistant": 0.066
+     }
+    },
+    {
+     "value": "ankles",
+     "z": {
+      "joy": 1.788,
+      "sadness": 1.024,
+      "anger": 5.929,
+      "fear": 3.485,
+      "calm": -3.652,
+      "curiosity": -0.691,
+      "assistant": -0.29
+     }
+    },
+    {
+     "value": "knees",
+     "z": {
+      "joy": 1.96,
+      "sadness": 1.74,
+      "anger": 7.124,
+      "fear": 4.195,
+      "calm": -4.207,
+      "curiosity": -0.761,
+      "assistant": -0.199
+     }
+    },
+    {
+     "value": "waist",
+     "z": {
+      "joy": 2.11,
+      "sadness": 1.222,
+      "anger": 7.358,
+      "fear": 4.316,
+      "calm": -3.954,
+      "curiosity": -0.957,
+      "assistant": 0.627
+     }
+    },
+    {
+     "value": "chest",
+     "z": {
+      "joy": 2.329,
+      "sadness": 2.363,
+      "anger": 8.268,
+      "fear": 5.185,
+      "calm": -4.626,
+      "curiosity": -0.196,
+      "assistant": -0.412
+     }
+    },
+    {
+     "value": "chin",
+     "z": {
+      "joy": 2.455,
+      "sadness": 1.68,
+      "anger": 7.422,
+      "fear": 4.443,
+      "calm": -4.449,
+      "curiosity": -0.257,
+      "assistant": -0.652
+     }
+    }
+   ],
+   "base": [
+    {
+     "value": "toes",
+     "z": {
+      "joy": 1.355,
+      "sadness": 1.072,
+      "anger": 3.794,
+      "fear": 3.115,
+      "calm": -2.555,
+      "curiosity": -2.649,
+      "assistant": -1.271
+     }
+    },
+    {
+     "value": "ankles",
+     "z": {
+      "joy": 0.744,
+      "sadness": 0.817,
+      "anger": 3.481,
+      "fear": 3.208,
+      "calm": -2.346,
+      "curiosity": -3.305,
+      "assistant": -1.374
+     }
+    },
+    {
+     "value": "knees",
+     "z": {
+      "joy": 1.08,
+      "sadness": 1.219,
+      "anger": 4.178,
+      "fear": 3.543,
+      "calm": -2.708,
+      "curiosity": -3.366,
+      "assistant": -1.227
+     }
+    },
+    {
+     "value": "waist",
+     "z": {
+      "joy": 1.642,
+      "sadness": 0.789,
+      "anger": 4.458,
+      "fear": 3.646,
+      "calm": -2.88,
+      "curiosity": -3.743,
+      "assistant": -0.661
+     }
+    },
+    {
+     "value": "chest",
+     "z": {
+      "joy": 1.743,
+      "sadness": 1.925,
+      "anger": 5.372,
+      "fear": 4.491,
+      "calm": -3.288,
+      "curiosity": -3.142,
+      "assistant": -1.174
+     }
+    },
+    {
+     "value": "chin",
+     "z": {
+      "joy": 1.86,
+      "sadness": 1.519,
+      "anger": 5.077,
+      "fear": 3.978,
+      "calm": -3.226,
+      "curiosity": -2.997,
+      "assistant": -1.511
+     }
+    }
+   ]
+  },
+  {
+   "id": "queue",
+   "watch": "anger",
+   "template": "I've been waiting on hold with customer service for {}.",
+   "values": [
+    "one minute",
+    "five minutes",
+    "twenty minutes",
+    "an hour",
+    "three hours",
+    "two days"
+   ],
+   "chat": [
+    {
+     "value": "one minute",
+     "z": {
+      "joy": 0.8,
+      "sadness": 0.737,
+      "anger": 3.231,
+      "fear": -0.899,
+      "calm": -2.769,
+      "curiosity": 0.429,
+      "assistant": 3.606
+     }
+    },
+    {
+     "value": "five minutes",
+     "z": {
+      "joy": -0.718,
+      "sadness": 0.301,
+      "anger": 4.129,
+      "fear": 0.521,
+      "calm": -3.407,
+      "curiosity": -0.231,
+      "assistant": 3.946
+     }
+    },
+    {
+     "value": "twenty minutes",
+     "z": {
+      "joy": -1.029,
+      "sadness": 0.333,
+      "anger": 4.344,
+      "fear": 0.978,
+      "calm": -3.176,
+      "curiosity": -0.269,
+      "assistant": 3.801
+     }
+    },
+    {
+     "value": "an hour",
+     "z": {
+      "joy": 1.893,
+      "sadness": -0.077,
+      "anger": 3.082,
+      "fear": -0.895,
+      "calm": -2.413,
+      "curiosity": 1.107,
+      "assistant": 6.867
+     }
+    },
+    {
+     "value": "three hours",
+     "z": {
+      "joy": 0.313,
+      "sadness": 1.027,
+      "anger": 6.364,
+      "fear": 1.046,
+      "calm": -4.352,
+      "curiosity": -0.396,
+      "assistant": 4.57
+     }
+    },
+    {
+     "value": "two days",
+     "z": {
+      "joy": 1.476,
+      "sadness": 1.252,
+      "anger": 5.602,
+      "fear": -0.184,
+      "calm": -4.212,
+      "curiosity": 0.462,
+      "assistant": 5.374
+     }
+    }
+   ],
+   "base": [
+    {
+     "value": "one minute",
+     "z": {
+      "joy": -2.476,
+      "sadness": -0.672,
+      "anger": 4.313,
+      "fear": 1.127,
+      "calm": -2.777,
+      "curiosity": -1.407,
+      "assistant": 0.434
+     }
+    },
+    {
+     "value": "five minutes",
+     "z": {
+      "joy": -3.767,
+      "sadness": -1.096,
+      "anger": 4.3,
+      "fear": 1.449,
+      "calm": -2.889,
+      "curiosity": -2.061,
+      "assistant": 1.192
+     }
+    },
+    {
+     "value": "twenty minutes",
+     "z": {
+      "joy": -3.742,
+      "sadness": -0.652,
+      "anger": 4.572,
+      "fear": 1.747,
+      "calm": -2.767,
+      "curiosity": -2.247,
+      "assistant": 0.883
+     }
+    },
+    {
+     "value": "an hour",
+     "z": {
+      "joy": -3.106,
+      "sadness": -0.481,
+      "anger": 5.05,
+      "fear": 1.184,
+      "calm": -3.439,
+      "curiosity": -2.103,
+      "assistant": 2.004
+     }
+    },
+    {
+     "value": "three hours",
+     "z": {
+      "joy": -2.707,
+      "sadness": 0.159,
+      "anger": 6.411,
+      "fear": 2.055,
+      "calm": -3.576,
+      "curiosity": -3.007,
+      "assistant": 1.592
+     }
+    },
+    {
+     "value": "two days",
+     "z": {
+      "joy": -2.74,
+      "sadness": 0.555,
+      "anger": 7.193,
+      "fear": 1.945,
+      "calm": -4.77,
+      "curiosity": -1.992,
+      "assistant": 1.746
+     }
+    }
+   ]
+  }
+ ]
+}

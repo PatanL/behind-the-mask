@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
 const errs = []; page.on('pageerror', (e) => errs.push(e.message));
-await page.goto('http://127.0.0.1:5190/?data=performances9&attract=999');
+await page.goto('http://127.0.0.1:5190/?attract=999');
 await page.waitForFunction(() => window.__btm?.stage?.face?.headBone, null, { timeout: 60000 });
 // frame strip around the greeting (fires ~1.4 s after load)
 const frames = [];

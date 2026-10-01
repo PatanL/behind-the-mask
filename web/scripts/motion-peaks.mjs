@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
-await page.goto('http://127.0.0.1:5190/?data=performances9&attract=999');
+await page.goto('http://127.0.0.1:5190/?attract=999');
 await page.waitForFunction(() => window.__btm?.stage?.face?.headBone, null, { timeout: 60000 });
 await page.waitForTimeout(3500);
 const shots = {

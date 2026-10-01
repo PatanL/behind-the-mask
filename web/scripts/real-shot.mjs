@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
-await page.goto('http://127.0.0.1:5190/?data=performances9');
+await page.goto('http://127.0.0.1:5190/');
 await page.waitForSelector('#real:not([hidden])', { timeout: 30000 });
 await page.locator('#real').scrollIntoViewIfNeeded();
 await page.evaluate(() => { const r = document.querySelector('#real input[type=range]'); r.value = 5; r.dispatchEvent(new Event('input')); });

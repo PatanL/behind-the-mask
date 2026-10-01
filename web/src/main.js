@@ -13,13 +13,36 @@ import { HOW_STEPS } from './how.js';
 import { FeelMap } from './feelmap.js';
 import { initRealSection } from './real.js';
 import { shareCard } from './share.js';
+import { createLive, liveStatus } from './live.js';
 const initReal = () => initRealSection(document.querySelector('#real'));
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
-const state = { index: null, qid: null, emotion: 'joy', level: 'lot', playing: false, doc: null, runId: 0, lastTouch: Date.now(), attract: false };
+const state = { index: null, qid: null, emotion: 'joy', level: 'lot', playing: false, doc: null, runId: 0, lastTouch: Date.now(), attract: false, mode: 'made' };
 const GAIN = Number(params.get('gain') || 1.4);
 let FEATS = null;
+let DECODER = null;   // ${DATA_DIR}/decoder.json: readout lift -> the feeling the face shows (scripts/fit-decoder.mjs)
+
+// What the face shows. The raw readout has cross-talk (the anger direction also rises on fear and sadness
+// pushes), so the face reads it through a linear decoder fitted on the pre-computed pushes. `lift` is the
+// smoothed, signed readout minus the unpushed answer's mean.
+function faceFrom(lift) {
+  let v;
+  if (DECODER) {
+    const { M, floor, gain } = DECODER;
+    v = ORDER.map((_, j) => Math.max(0, (ORDER.reduce((s, _e, i) => s + lift[i] * M[i][j], 0) - floor) * gain[j]));
+  } else v = ORDER.map((_, k) => Math.max(0, lift[k] / (GAIN * 4)));
+  // a small dead zone, then a gain so that mild signals still read from across a room
+  return Object.fromEntries(ORDER.map((e, j) => [e, Math.min(1, 1.3 * Math.pow(Math.max(0, v[j] - 0.04) / 0.96, 0.8))]));
+}
+// smoothed signed lift over a token list (as the face would have seen it by the end)
+function liftOf(tokens, mu, upto = tokens.length) {
+  const rate = DECODER?.rate ?? 0.2, l = ORDER.map(() => 0);
+  for (let i = 0; i < upto; i++) ORDER.forEach((_, k) => { l[k] += (tokens[i].e[k] - mu[k] - l[k]) * rate; });
+  return l;
+}
+// mean signed lift (for the lingering after-state)
+const meanLift = (tokens, mu) => ORDER.map((_, k) => (tokens.length ? tokens.reduce((s, t) => s + t.e[k] - mu[k], 0) / tokens.length : 0));
 
 /** How "assistant-like" the model's state is: 0 = like its role-play personas, 1 = like its own assistant voice. */
 function maskOf(z, mind = 'chat') {
@@ -119,6 +142,7 @@ async function scrub() {
   const focus = doc.emotion;
   setPush(focus, doc.level);
   $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
+  setRedacted(doc);
   speech.clear();
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
   const maskPlain = pl.length ? pl.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / pl.length : 1;
@@ -132,7 +156,7 @@ async function scrub() {
   setMask(maskEma);
   const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, st.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, st.length) / GAIN))]));
   spine.setMeters(avg); feelmap.setState(avg);
-  stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, Math.min(1, 1.25 * Math.pow(avg[e], 0.7))])), { intensity: doc.level === 'toomuch' ? 1.25 : 1 });
+  stage.face.setEmotion(faceFrom(liftOf(st, mu)), { intensity: doc.level === 'toomuch' ? 1.15 : 1 });
   stage.setGlow(focus === 'unmask' ? Math.max(0.15, (maskPlain - maskEma) * 2) : Math.max(0.15, (avg[focus] || 0) * 1.3));
   showReveals(doc);
 }
@@ -143,53 +167,72 @@ function pickSwing(q) {
   return keys[Math.floor(Math.random() * keys.length)];
 }
 
+async function* arrayFeed(arr) { for (const x of arr) yield x; }
+const meanE = (toks, k) => (toks.length ? toks.reduce((s, t) => s + t.e[k], 0) / toks.length : 0);
+
+/**
+ * Perform one answer. Pre-made: opts = {} (uses state.qid / emotion / level).
+ * Live: opts.live = { doc (filled as tokens arrive), feed (async iterator of steered tokens), final (Promise<doc>) }.
+ */
 async function play(opts = {}) {
-  if (!state.qid) return;
-  const q = state.index.questions.find((x) => x.id === state.qid);
-  let key = `${state.emotion}|${state.level}`;
-  if (state.emotion === 'none') key = 'none|none';
-  if (state.emotion === 'swing') key = pickSwing(q);
-  const pid = q.performances[key];
-  if (!pid) return;
+  let doc, feed;
+  if (state.mode === 'live') leaveLive();
   const run = ++state.runId;
+  if (opts.live) {
+    doc = opts.live.doc; feed = opts.live.feed;
+  } else {
+    if (!state.qid) return;
+    const q = state.index.questions.find((x) => x.id === state.qid);
+    let key = `${state.emotion}|${state.level}`;
+    if (state.emotion === 'none') key = 'none|none';
+    if (state.emotion === 'swing') key = pickSwing(q);
+    const pid = q.performances[key];
+    if (!pid) return;
+    doc = null;
+    state.playing = true; refresh();
+    doc = await loadPerformance(pid);
+    if (run !== state.runId) return;
+    feed = arrayFeed(doc.streams.steered.tokens);
+  }
   state.playing = true; refresh();
   $('#reveals').hidden = true;
   if (!state.attract && !opts.tour) document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
   $('#speech-hint').hidden = true;
   closeInspect();
-  const doc = await loadPerformance(pid);
-  if (run !== state.runId) return;
   state.doc = doc;
   const steered = doc.streams.steered.tokens;
   const plain = doc.streams.plain.tokens;
-  // baseline: the model's own readout on the unpushed answer to the same question
-  const mu = ORDER.map((_, k) => (plain.length ? plain.reduce((s, t) => s + t.e[k], 0) / plain.length : 0));
+  // baseline: the model's own readout on the unpushed answer (live: on the part written so far)
+  const fullMu = opts.live ? null : ORDER.map((_, k) => meanE(plain, k));
+  const muNow = () => fullMu || ORDER.map((_, k) => meanE(plain, k));
   const [e1, e2] = doc.emotion.includes('>') ? doc.emotion.split('>') : [doc.emotion, null];
-  const focus0 = e1 === 'none' ? null : e1;
-  let focus = focus0;
+  let focus = e1 === 'none' ? null : e1;
   setPush(focus, doc.level, e2 ? 'swing-start' : null);
-  $('#speech-label').textContent = `“${doc.question}”`;
+  $('#speech-label').textContent = opts.live ? `“${doc.question}” · live` : `“${doc.question}”`;
   $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
   $('#push-badge').classList.toggle('warn', doc.level === 'toomuch');
+  setRedacted(doc);
   speech.begin();
   feelmap.reset(); feelmap.setFocus(focus);
   // a moment to "think": glance aside, press the lips, breathe in, then start writing
   stage.face.react('think');
-  await sleep(opts.fast ? 250 : 950);
+  if (!opts.live) await sleep(opts.fast ? 250 : 950);
   if (run !== state.runId) return;
   stage.face.setActivity({ writing: true });
-  let lastEmph = -10;
+  let lastEmph = -10, i = -1, lastT = performance.now();
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
-  const maskPlain = plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1;
-  let maskEma = maskPlain;
+  const lift = ORDER.map(() => 0), liftRate = DECODER?.rate ?? 0.2;
+  const maskPlainNow = () => (plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1);
+  const maskFixed = opts.live ? null : maskPlainNow();
+  let maskEma = maskPlainNow();
   setMask(maskEma);
-  for (let i = 0; i < steered.length; i++) {
+  for await (const tok of feed) {
+    i++;
     if (run !== state.runId) return;
-    const tok = steered[i];
     let swingMark = false;
     if (e2 && doc.swing_at != null && i === doc.swing_at) { focus = e2; setPush(focus, 'lot', 'swing'); feelmap.setFocus(focus); swingMark = true; }
-    const delta = {};
-    ORDER.forEach((e, k) => { delta[e] = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (delta[e] - ema[e]) * 0.28; });
+    const mu = muNow(), maskPlain = maskFixed ?? maskPlainNow();
+    ORDER.forEach((e, k) => { const d = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (d - ema[e]) * 0.28; lift[k] += (tok.e[k] - mu[k] - lift[k]) * liftRate; });
     const mk = maskOf(tok.e);
     if (mk != null) { maskEma += (mk - maskEma) * 0.2; setMask(maskEma); }
     const tint = focus === 'unmask' ? { ...ema, unmask: Math.max(0, Math.min(1, (maskPlain - maskEma) * 1.6)) } : ema;
@@ -199,33 +242,138 @@ async function play(opts = {}) {
     spine.setMeters(ema);
     feelmap.setState(ema);
     if (focus && focus !== 'unmask' && ema[focus] != null) { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
-    // expression gain: mild signals should still read on the face from across a room
-    const faceIn = Object.fromEntries(ORDER.map((e) => [e, Math.min(1, 1.25 * Math.pow(ema[e], 0.7))]));
-    stage.face.setEmotion(faceIn, { intensity: doc.level === 'toomuch' ? 1.25 : 1.0 });
+    stage.face.setEmotion(faceFrom(lift), { intensity: doc.level === 'toomuch' ? 1.15 : 1.0 });
     stage.setGlow(focus ? Math.max(0.15, Math.min(1, (focus === 'unmask' ? tint.unmask : ema[focus]) * 1.3)) : 0.15);
     const t = tok.t;
-    if (/\?\s*$/.test(t)) stage.face.beat('question');
-    else if (/!\s*$/.test(t)) stage.face.beat('exclaim');
-    else if (/[.]\s*$/.test(t) && !/\.\.\s*$/.test(t)) stage.face.beat('period');
-    else if (/[,;:—]\s*$/.test(t)) stage.face.beat('comma');
-    else if (pushInfo(tok)?.shown && i - lastEmph > 6) { stage.face.beat('emphasis'); lastEmph = i; }
+    if (beatFor(tok, i, lastEmph)) lastEmph = i;
     let wait = 62 + Math.min(80, t.length * 6);
     if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
-    await sleep(wait / (opts.fast ? 3 : 1));
+    if (opts.live) wait = Math.min(wait, 140);           // live: tokens already arrive at reading pace
+    const spent = performance.now() - lastT;
+    await sleep(Math.max(0, wait / (opts.fast ? 3 : 1) - (opts.live ? spent : 0)));
+    lastT = performance.now();
   }
   speech.end();
   stage.face.setActivity({ writing: false });
   stage.face.react('done');
+  if (opts.live) { doc = await opts.live.final; if (run !== state.runId) return; state.doc = doc; }
   state.playing = false; refresh();
   // the feeling lingers, then relaxes
   // meters settle on the answer's average lift; the face relaxes but keeps a trace of the feeling
-  const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, steered.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, steered.length) / GAIN))]));
-  setTimeout(() => { if (run === state.runId && !state.playing) { stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, avg[e] * 0.6]))); spine.setMeters(avg); feelmap.setState(avg); } }, 2600);
+  const mu = muNow();
+  const st = doc.streams.steered.tokens;
+  const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, st.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, st.length) / GAIN))]));
+  const after = faceFrom(meanLift(st, mu));
+  setTimeout(() => { if (run === state.runId && !state.playing) { stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, after[e] * 0.6]))); spine.setMeters(avg); feelmap.setState(avg); } }, 2600);
   if (!opts.tour) showReveals(doc);
-  $('#dial-hint').hidden = !(doc.emotion !== 'none' && !doc.emotion.includes('>'));
+  $('#dial-hint').hidden = opts.live || !(doc.emotion !== 'none' && !doc.emotion.includes('>'));
 }
 
+/** A withheld answer: its words are blacked out, but its measured readout still plays on the colours and face. */
+function setRedacted(doc) {
+  const r = !!doc.streams.steered.redacted;
+  $('#speech').classList.toggle('redacted', r);
+  $('#withheld-note').hidden = !r;
+  $('#share').hidden = r;
+}
+
+/** Conversational beats from the text as it is written; returns true for an emphasis beat. */
+function beatFor(tok, i, lastEmph) {
+  const t = tok.t;
+  if (/\?\s*$/.test(t)) stage.face.beat('question');
+  else if (/!\s*$/.test(t)) stage.face.beat('exclaim');
+  else if (/[.]\s*$/.test(t) && !/\.\.\s*$/.test(t)) stage.face.beat('period');
+  else if (/[,;:—]\s*$/.test(t)) stage.face.beat('comma');
+  else if (pushInfo(tok)?.shown && i - lastEmph > 6) { stage.face.beat('emphasis'); return true; }
+  return false;
+}
+
+// ------------------------------------------------------------------ live: everyone steers one story
+let live = null, liveLastEmph = -10, livePushKey = '';
+function setupLive() {
+  live = createLive({
+    $, stage, speech, spine, feelmap, faceFrom, maskOf, setMask, showFeatures,
+    labels: () => state.index.labels,
+    setDoc: (doc) => { if (state.mode === 'live') state.doc = doc; },
+    beat: (tok, i) => { if (i < liveLastEmph) liveLastEmph = -10; if (beatFor(tok, i, liveLastEmph)) liveLastEmph = i; },
+    onPush: (lead, p) => {
+      const lv = p < 0.35 ? 'little' : p < 0.7 ? 'lot' : 'toomuch', key = `${lead}|${lv}`;
+      if (key === livePushKey) return;
+      livePushKey = key;
+      setPush(lead, lv);
+      $('#push-badge').textContent = lead ? `Live · everyone is pushing ${lead === 'unmask' ? 'off the mask' : EMO[lead].label.toLowerCase()}` : 'Live · nobody pushing yet';
+    },
+  });
+  $('#mode-live').onclick = () => enterLive();
+  $('#hero-live').onclick = () => enterLive();
+  $('#mode-made').onclick = () => leaveLive();
+  $('#live-leave').onclick = () => { leaveLive(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  const poll = async () => {
+    const s = await liveStatus();
+    $('#mode').hidden = !s; $('#hero-live').hidden = !s;
+    const n = s ? (s.viewers ? `${s.viewers} here now` : 'nobody yet') : '';
+    $('#hero-live-n').textContent = n; $('#mode-live-n').textContent = s?.viewers ? `· ${s.viewers}` : '';
+    return s;
+  };
+  poll().then((s) => { if (s && params.get('live')) enterLive(); });
+  setInterval(() => { if (state.mode !== 'live') poll(); }, 15000);
+}
+function enterLive() {
+  if (!live || state.mode === 'live') return;
+  touch();
+  state.touring = false; state.runId++; state.playing = false; state.mode = 'live';
+  hideHero(); closeInspect();
+  for (const id of ['#reveals', '#speech-hint', '#withheld-note', '#tour-step']) $(id).hidden = true;
+  $('#deck').classList.add('is-live'); $('#live').hidden = false; document.body.classList.add('live');
+  $('#mode-made').setAttribute('aria-pressed', 'false'); $('#mode-live').setAttribute('aria-pressed', 'true');
+  livePushKey = '';
+  stage.face.setActivity({ writing: false });
+  live.enter();
+  refresh();
+  document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function leaveLive() {
+  if (state.mode !== 'live') return;
+  state.mode = 'made';
+  live.leave();
+  $('#deck').classList.remove('is-live'); $('#live').hidden = true; $('#withheld-note').hidden = true; document.body.classList.remove('live');
+  $('#speech').classList.remove('redacted');
+  $('#mode-made').setAttribute('aria-pressed', 'true'); $('#mode-live').setAttribute('aria-pressed', 'false');
+  speech.clear(); state.doc = null;
+  $('#speech-label').textContent = 'It will answer here.';
+  setPush(null);
+  refresh();
+}
+
+// ------------------------------------------------------------------ face narration (what the acting means)
+const BLEND_NOTE = {
+  bittersweet: 'Bittersweet: sad brows, a smile', 'nervous smile': 'A nervous smile, eyes not in it',
+  worry: 'Worry: brows pulled up and together', hurt: 'Hurt: knitted brows, chin pushed up',
+  cornered: 'Cornered: brows down, eyes wide', smug: 'A tight, one-sided smile',
+  contempt: 'Contempt: a one-sided smile', resigned: 'Resigned: heavy lids, a pressed mouth',
+};
+const FEEL_WORD = { sadness: 'sadness', anger: 'anger', fear: 'fear', disgust: 'disgust' };
+let narr = { text: '', until: 0, leakSeen: 0 };
+setInterval(() => {
+  const f = stage.face, cap = $('#caption');
+  if (!f?.felt || state.attract || !(state.playing || state.mode === 'live' || state.doc)) { if (!state.attract && narr.text) { cap.textContent = ''; narr.text = ''; } return; }
+  const now = performance.now();
+  let text = '';
+  const L = f.lastLeak;
+  if (L?.covered && L.t !== narr.leakSeen && f.time - L.t < 0.6) { narr.leakSeen = L.t; narr.until = now + 2200; narr.text = `A flash of ${FEEL_WORD[L.emo] || L.emo} slipped through`; }
+  if (now < narr.until) text = narr.text;
+  else {
+    const neg = ['sadness', 'anger', 'fear'].reduce((a, e) => ((f.felt[e] || 0) > (f.felt[a] || 0) ? e : a), 'sadness');
+    const nv = f.felt[neg] || 0;
+    if (f.reg > 0.45 && nv > 0.2) text = `Hiding ${FEEL_WORD[neg]} behind a polite face`;
+    else if (f.reg < 0.12 && nv > 0.45 && f.maskS.x < 0.2) text = `The mask is off: raw ${FEEL_WORD[neg]}`;
+    else if (f.blend && f.blendK > 0.35 && BLEND_NOTE[f.blend]) text = BLEND_NOTE[f.blend];
+  }
+  if (text !== cap.textContent) cap.textContent = text;
+}, 300);
+
 function setMask(v) {
+  if (v != null) stage.face.setMask?.(v);   // the trained persona acts as a display rule on the face
   if (v != null && state.index?.mask_scale) { $('#mini').hidden = false; $('#mini-mask').style.width = `${Math.round(v * 100)}%`; }
   const el = $('#mask-meter'); if (!el || v == null || !state.index?.mask_scale) return;
   el.hidden = false;
@@ -268,7 +416,11 @@ function showReveals(doc) {
   let split = -1;
   for (let i = 0; i < Math.max(st.length, pl.length); i++) { if (!st[i] || !pl[i] || st[i].t !== pl[i].t) { split = i; break; } }
   const plainEl = $('#plain-text');
-  if (doc.emotion === 'none') {
+  const redacted = !!doc.streams.steered.redacted;
+  if (redacted) {
+    plainEl.innerHTML = esc(textOf(pl));
+    $('#plain-foot').textContent = 'This is what it said without the push. With it, the answer turned abusive, so we hide those words.';
+  } else if (doc.emotion === 'none') {
     plainEl.innerHTML = esc(textOf(pl));
     $('#plain-foot').textContent = 'No push this time, so this is identical to what you just read. Pick a feeling to see the difference.';
   } else if (split < 0) {
@@ -285,7 +437,9 @@ function showReveals(doc) {
   const infos = st.map((t, i) => ({ i, t, info: pushInfo(t) })).filter((x) => x.info);
   const pushed = infos.filter((x) => x.info.pushed);
   const statEl = $('#decision-stat');
-  if (doc.emotion === 'none') {
+  if (redacted) {
+    statEl.innerHTML = `${st.length}<small>word-pieces written, but withheld from this exhibit.</small>`;
+  } else if (doc.emotion === 'none') {
     statEl.innerHTML = `${st.length}<small>word-pieces written, each picked from ~150,000 options.</small>`;
   } else {
     statEl.innerHTML = `${pushed.length} of ${st.length}<small>choices were tipped by the push (the chosen word became at least 2.5× likelier).</small>`;
@@ -298,7 +452,7 @@ function showReveals(doc) {
     r.onclick = () => { const s = speech.spans[i]; s?.scrollIntoView({ block: 'nearest' }); inspect(i, s); };
     bars.appendChild(r);
   });
-  $('#speech-hint').hidden = doc.emotion === 'none';
+  $('#speech-hint').hidden = doc.emotion === 'none' || redacted;
   $('#reveals').hidden = false;
   if (!state.attract && window.innerWidth < 1100) setTimeout(() => $('#reveals').scrollIntoView({ behavior: 'smooth', block: 'start' }), 900);
 }
@@ -311,7 +465,8 @@ function renderBase() {
   const text = s.text.replace(/\n\s*Q?:?\s*$/, '').trim();
   const invented = text.split(/\n+/).map((line, i) => (i > 0 && /^\s*(Q|A):/.test(line) ? `<span class="invented">${esc(line)}</span>` : esc(line))).join('<br>');
   const inventedNote = /\n\s*Q:/.test(text) ? '<div class="invented-note">It kept going, and wrote the next questions itself. A base model only continues text; nobody taught it to stop and answer.</div>' : '';
-  $('#base-text').innerHTML = s.safe === false || !text ? '<em>(The base model wrote something we don’t show in this exhibit, or nothing at all. Base models are unfiltered.)</em>' : invented + inventedNote;
+  $('#base-text').innerHTML = s.safe === false ? '<em>(At this push the base model wrote something abusive, so we don’t show it. Base models are unfiltered.)</em>'
+    : !text ? '<em>(The base model wrote nothing here.)</em>' : invented + inventedNote;
 }
 
 // ------------------------------------------------------------------ share
@@ -380,6 +535,7 @@ async function buildTriptych() {
 // ------------------------------------------------------------------ word inspector
 function inspect(i, el) {
   const doc = state.doc; if (!doc || !el) return;
+  if (doc.streams.steered.redacted) return;
   const st = doc.streams.steered.tokens, tok = st[i];
   const box = $('#inspect');
   const before = textOf(st.slice(Math.max(0, i - 10), i));
@@ -428,7 +584,7 @@ function touch() { state.lastTouch = Date.now(); if (state.attract) { state.attr
 ['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, () => { state.lastTouch = Date.now(); if (state.attract) { state.attract = false; state.runId++; state.playing = false; $('#caption').textContent = ''; refresh(); } }, true));
 const ATTRACT_AFTER = params.get('kiosk') || params.get('attract') ? Number(params.get('attract') || 45) * 1000 : Infinity;
 setInterval(async () => {
-  if (state.playing || !state.index || Date.now() - state.lastTouch < ATTRACT_AFTER) return;
+  if (state.playing || state.mode === 'live' || !state.index || Date.now() - state.lastTouch < ATTRACT_AFTER) return;
   state.attract = true; hideHero();
   const qs = state.index.questions;
   const q = qs[Math.floor(Math.random() * qs.length)];
@@ -445,12 +601,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ------------------------------------------------------------------ boot
 (async () => {
   state.index = await loadIndex();
+  fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/decoder.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { DECODER = j; }).catch(() => {});
   fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/features.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { FEATS = j; if (j) $('#features-wrap').hidden = false; }).catch(() => {});
   initReal();
   buildTriptych();
   spine.configure(state.index.n_layers, state.index.layer);
   if (state.index.map) feelmap.setMap(state.index.map);
   buildControls();
+  setupLive();
   // first-time visitors: one tap on the big button gives a result
   state.qid = params.get('q') || (state.index.questions.find((x) => x.id === 'how-was-your-day') || state.index.questions[0]).id;
   if (params.get('e')) state.emotion = params.get('e');

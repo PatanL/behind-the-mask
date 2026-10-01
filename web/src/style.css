@@ -41,7 +41,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .stage-wrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) 150px; grid-template-areas: "stage speech inside"; gap: clamp(12px, 2vw, 28px); align-items: center; min-height: min(62vh, 640px); }
 .stage { grid-area: stage; position: relative; aspect-ratio: 4 / 5; max-height: 64vh; width: 100%; justify-self: center; }
 #face-canvas { width: 100%; height: 100%; display: block; border-radius: 28px; }
-.stage-caption { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 13px; color: var(--ink2); min-height: 18px; }
+.stage-caption { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 32px); text-align: center; font-size: 14px; line-height: 1.3; color: var(--ink); min-height: 18px; }
+.stage-caption:not(:empty) { padding: 7px 14px; border-radius: 999px; background: rgba(10,12,24,0.72); border: 1px solid color-mix(in srgb, var(--push) 40%, transparent); backdrop-filter: blur(8px); animation: capin 0.35s ease-out; }
+@keyframes capin { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .push-badge { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
   background: color-mix(in srgb, var(--push) 22%, rgba(10,12,24,0.8)); border: 1px solid color-mix(in srgb, var(--push) 55%, transparent); color: var(--ink); white-space: nowrap; box-shadow: 0 0 24px color-mix(in srgb, var(--push) 35%, transparent); }
 
@@ -255,7 +257,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mini-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .mini-bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--push); transition: width 0.25s ease; }
 #mini-mask { background: linear-gradient(90deg, #ff8fb1, #eef0f7); }
-@media (max-width: 720px) { .mini:not([hidden]) { display: grid; } }
+@media (max-width: 720px) { .mini:not([hidden]) { display: grid; } .stage-caption { bottom: 74px; font-size: 13px; white-space: nowrap; } }
 
 /* the push dial */
 .dial { margin-top: 12px; }
@@ -270,4 +272,52 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dial-ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink3); }
 .dial-hint { margin-top: 6px; font-size: 12px; color: var(--push); }
 .tok.changed { animation: changed 1.2s ease-out both; }
+/* live: everyone steers one story */
+.live-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #ff4d5e; box-shadow: 0 0 0 0 #ff4d5e88; animation: livepulse 1.6s ease-out infinite; flex: none; }
+@keyframes livepulse { 0% { box-shadow: 0 0 0 0 #ff4d5e99; } 100% { box-shadow: 0 0 0 9px #ff4d5e00; } }
+.live-cta { margin-top: 18px; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 12px 16px; border-radius: 16px; border: 1px solid #ff4d5e55; background: #ff4d5e12; color: var(--ink); font-size: 15px; line-height: 1.35; }
+.live-cta:hover { background: #ff4d5e22; }
+.live-n { margin-left: auto; font-size: 12px; color: var(--ink2); white-space: nowrap; }
+.mode { grid-column: 1 / -1; display: flex; gap: 8px; flex-wrap: wrap; }
+.mode-b { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); border-radius: 999px; padding: 8px 14px; font-size: 14px; color: var(--ink2); }
+.mode-b[aria-pressed="true"] { background: var(--ink); color: #0b0d18; border-color: var(--ink); }
+.deck.is-live .step { display: none; }
+.live-panel { margin-top: 18px; display: grid; gap: 12px; }
+.live-h { font-size: 14px; line-height: 1.45; color: var(--ink2); }
+.live-buttons { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.tapb { --c: var(--ink2); --heat: 0; position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 4px 10px; border-radius: 16px; border: 1px solid color-mix(in srgb, var(--c) calc(25% + var(--heat) * 60%), var(--line)); background: color-mix(in srgb, var(--c) calc(4% + var(--heat) * 18%), transparent); font-size: 12px; color: var(--ink); touch-action: manipulation; user-select: none; -webkit-user-select: none; transition: background 0.25s ease, border-color 0.25s ease; }
+.tapb .ball { width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff 0%, var(--c) 38%, color-mix(in srgb, var(--c) 40%, #000) 100%); box-shadow: 0 0 calc(var(--heat) * 26px) calc(var(--heat) * 3px) var(--c); transition: transform 0.12s ease; }
+.tapb .tl { line-height: 1.15; text-align: center; }
+.tapb.held .ball { transform: scale(0.9); }
+.tapb .ring { position: absolute; left: 50%; top: 29px; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; border: 2px solid var(--c); opacity: 0; pointer-events: none; }
+.tapb.pop .ring { animation: tapring 0.55s ease-out; }
+@keyframes tapring { 0% { transform: scale(1); opacity: 0.9; } 100% { transform: scale(2.4); opacity: 0; } }
+.crowd-bar { display: flex; height: 12px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.crowd-bar i { display: block; height: 100%; background: var(--c); width: 0; transition: width 0.3s linear; box-shadow: 0 0 12px var(--c); }
+.crowd-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; font-size: 13px; color: var(--ink2); }
+.live-status { font-size: 13px; color: var(--ink3); min-height: 1.2em; }
+.live-plain { border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; background: rgba(255,255,255,0.02); display: grid; gap: 8px; }
+.live-plain-h { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink2); }
+#live-leave { justify-self: start; }
+/* live: keep the face in view while the story grows; the story scrolls in its own box */
+@media (min-width: 1100px) { body.live .stage, body.live .inside { align-self: start; position: sticky; top: 12px; } body.live .speech-wrap { align-self: start; } }
+body.live .speech { max-height: 40vh; }
+.live-plain .card-text { max-height: 26vh; overflow: auto; }
+/* phones: the feeling buttons ride along at the bottom of the screen while you watch */
+@media (max-width: 1099px) {
+  body.live { padding-bottom: 150px; }
+  body.live .live-buttons { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); gap: 6px;
+    grid-template-columns: repeat(7, minmax(0, 1fr)); background: rgba(6,8,18,0.86); backdrop-filter: blur(12px); border-top: 1px solid var(--line); }
+  body.live .tapb { padding: 8px 2px 6px; font-size: 10.5px; gap: 4px; }
+  body.live .tapb .ball { width: 28px; height: 28px; }
+  body.live .tapb .ring { top: 22px; width: 28px; height: 28px; margin: -14px 0 0 -14px; }
+  body.live .speech { max-height: 34vh; }
+  body.live .tapb .long { display: none; }
+}
+.tapb .short { display: none; }
+@media (max-width: 1099px) { body.live .tapb .short { display: inline; } }
+
+.speech.redacted .tok { letter-spacing: -0.06em; opacity: 0.92; cursor: default; }
+.speech.redacted .tok:hover { background: none; }
+.withheld-note { margin-top: 12px; font-size: 14px; line-height: 1.45; color: var(--ink2); border-left: 3px solid var(--warn, #ff8a6b); padding: 6px 0 6px 12px; }
 @keyframes changed { 0% { background: color-mix(in srgb, var(--push) 45%, transparent); } 100% { background: transparent; } }

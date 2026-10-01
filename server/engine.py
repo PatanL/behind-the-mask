@@ -97,10 +97,14 @@ class Engine:
         self.chat, self.base, self.cfg = chat, base, cfg
         self.labels = chat.labels  # emotions + (optionally) "assistant"; base uses the same ordering
         self.lock = threading.Lock()
-        chat.install(); base.install()
-        ct, bt = chat.tokenizer, base.tokenizer
+        chat.install()
+        ct = chat.tokenizer
         self.chat_stops = {i for i in [ct.eos_token_id, ct.convert_tokens_to_ids("<|im_end|>"), ct.convert_tokens_to_ids("<|endoftext|>")] if isinstance(i, int) and i >= 0}
-        self.base_stops = {i for i in [bt.eos_token_id, bt.convert_tokens_to_ids("<|endoftext|>")] if isinstance(i, int) and i >= 0}
+        self.base_stops = set()
+        if base is not None:   # base=None: chat rows only (the live crowd story)
+            base.install()
+            bt = base.tokenizer
+            self.base_stops = {i for i in [bt.eos_token_id, bt.convert_tokens_to_ids("<|endoftext|>")] if isinstance(i, int) and i >= 0}
 
     def coef_tensor(self, steer: dict, rows: list[bool]) -> torch.Tensor:
         v = torch.tensor([float(steer.get(e, 0.0)) for e in self.labels])
@@ -115,16 +119,19 @@ class Engine:
             seed = seed if seed is not None else int(time.time() * 1000) % (2**31)
             gen = torch.Generator(device=chat.device).manual_seed(seed)
             c_ids = torch.tensor([chat_prompt_ids(chat, prompt)] * 3, device=chat.device)
-            b_ids = torch.tensor([base_prompt_ids(base, prompt)] * 2, device=base.device)
             streams = {
                 "plain": Stream(chat.tokenizer, self.chat_stops),
                 "steered": Stream(chat.tokenizer, self.chat_stops),
-                # the base model is left to run on: it often writes the *next* question itself
-                "base": Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n")),
-                "base_steered": Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n")),
             }
+            if base is not None:
+                b_ids = torch.tensor([base_prompt_ids(base, prompt)] * 2, device=base.device)
+                # the base model is left to run on: it often writes the *next* question itself
+                streams["base"] = Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n"))
+                streams["base_steered"] = Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n"))
+            else:
+                b_ids = None
             emit({"type": "turn_begin", "prompt": prompt, "seed": seed, "base_frame": BASE_FRAME.format(q=prompt.strip()),
-                        "layer": {"chat": chat.layer, "base": base.layer}, "n_layers": {"chat": chat.n_layers, "base": base.n_layers}})
+                  "layer": {"chat": chat.layer, "base": base.layer if base else None}, "n_layers": {"chat": chat.n_layers, "base": base.n_layers if base else None}})
             c_past = b_past = None
             c_in, b_in = c_ids, b_ids
             last = {}
@@ -132,16 +139,20 @@ class Engine:
             for step in range(cfg.max_new_tokens + 1):
                 if cancel is not None and cancel.is_set():
                     break
-                chat.set_coef(self.coef_tensor(steer_ref, [False, True, False]))
-                base.set_coef(self.coef_tensor(steer_ref, [False, True]))
+                steer_now = dict(steer_ref)   # the driver may change it at any time; one snapshot per step
+                chat.set_coef(self.coef_tensor(steer_now, [False, True, False]))
                 co = chat.model(c_in, past_key_values=c_past, use_cache=True)
                 c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :], chat.readout()
-                bo = base.model(b_in, past_key_values=b_past, use_cache=True)
-                b_past, b_logits, b_ro = bo.past_key_values, bo.logits[:, -1, :], base.readout()
+                if base is not None:
+                    base.set_coef(self.coef_tensor(steer_now, [False, True]))
+                    bo = base.model(b_in, past_key_values=b_past, use_cache=True)
+                    b_past, b_logits, b_ro = bo.past_key_values, bo.logits[:, -1, :], base.readout()
                 # the readout of this forward belongs to the token we fed in (emitted last step)
                 if step > 0:
-                    ro = {"plain": c_ro[0], "steered": c_ro[1], "counterfactual": c_ro[2], "base": b_ro[0], "base_steered": b_ro[1]}
-                    cf_, bf_ = chat.sae_features(), base.sae_features()
+                    ro = {"plain": c_ro[0], "steered": c_ro[1], "counterfactual": c_ro[2]}
+                    if base is not None:
+                        ro.update(base=b_ro[0], base_steered=b_ro[1])
+                    cf_, bf_ = chat.sae_features(), (base.sae_features() if base is not None else None)
                     feats = {"plain": cf_[0] if cf_ else None, "steered": cf_[1] if cf_ else None,
                              "base": bf_[0] if bf_ else None, "base_steered": bf_[1] if bf_ else None}
                     evs = []
@@ -156,17 +167,19 @@ class Engine:
                             info["feats"] = feats[name]
                         evs.append(info)
                     if evs:
-                        emit({"type": "tokens", "step": step - 1, "items": evs, "steer": {e: float(steer_ref.get(e, 0.0)) for e in self.labels}})
+                        emit({"type": "tokens", "step": step - 1, "items": evs, "steer": {e: float(last_steer.get(e, 0.0)) for e in self.labels}})
                 if all(s.done for s in streams.values()) or step == cfg.max_new_tokens:
                     break
                 noise_c = -torch.log(-torch.log(torch.rand((1, c_logits.shape[-1]), generator=gen, device=chat.device).clamp(1e-9, 1 - 1e-9)))
-                noise_b = -torch.log(-torch.log(torch.rand((1, b_logits.shape[-1]), generator=gen, device=base.device).clamp(1e-9, 1 - 1e-9)))
                 c_next = _sample(c_logits, noise_c.expand(3, -1), cfg.temperature, cfg.top_p)
-                b_next = _sample(b_logits, noise_b.expand(2, -1), cfg.temperature, cfg.top_p)
                 c_next[2] = c_next[1]  # counterfactual row follows the steered text
-                last = {}
-                for name, row, nxt, logits, tok in (("plain", 0, c_next, c_logits, chat.tokenizer), ("steered", 1, c_next, c_logits, chat.tokenizer),
-                                                    ("base", 0, b_next, b_logits, base.tokenizer), ("base_steered", 1, b_next, b_logits, base.tokenizer)):
+                rows = [("plain", 0, c_next, c_logits, chat.tokenizer), ("steered", 1, c_next, c_logits, chat.tokenizer)]
+                if base is not None:
+                    noise_b = -torch.log(-torch.log(torch.rand((1, b_logits.shape[-1]), generator=gen, device=base.device).clamp(1e-9, 1 - 1e-9)))
+                    b_next = _sample(b_logits, noise_b.expand(2, -1), cfg.temperature, cfg.top_p)
+                    rows += [("base", 0, b_next, b_logits, base.tokenizer), ("base_steered", 1, b_next, b_logits, base.tokenizer)]
+                last, last_steer = {}, steer_now
+                for name, row, nxt, logits, tok in rows:
                     s = streams[name]
                     if s.done:
                         last[name] = None
@@ -179,8 +192,12 @@ class Engine:
                         # what the unsteered assistant would have said next, given the same (steered) words so far
                         item["cf_alts"] = _alts(tok, c_logits[2], cfg.top_k_alts)
                     last[name] = item
-                c_in, b_in = c_next[:, None], b_next[:, None]
+                c_in = c_next[:, None]
+                if base is not None:
+                    b_in = b_next[:, None]
                 time.sleep(cfg.step_delay)
             emit({"type": "turn_end", "texts": {k: s.text for k, s in streams.items()}, "seconds": round(time.time() - t0, 2)})
-            chat.set_coef(None); base.set_coef(None)
+            chat.set_coef(None)
+            if base is not None:
+                base.set_coef(None)
             return {k: s.text for k, s in streams.items()}
