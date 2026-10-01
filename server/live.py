@@ -50,7 +50,7 @@ SESSION_SECONDS = 30 * 60  # then it starts afresh
 TOPIC_SECONDS = 5 * 60   # each topic runs at least this long (unless someone asks for a new one)
 KEEP_TURNS = 2           # earlier turns kept as context (their unpushed versions, see speak_turn)
 KEEP_WORDS = 70          # of each
-TOPIC_COOLDOWN = 20.0    # s between "new topic" requests
+TOPIC_COOLDOWN = 120.0   # s between "new topic" requests (one for everyone, so a crowd can't flip it constantly)
 BUTTONS = EMOTIONS + ["unmask"]
 # the speaking pace cap, tokens/s. Read at the start of every turn, so it can be changed while it runs:
 #   echo 7 > runs/live_tps      (no file: BTM_TPS, default 6: a comfortable reading pace)
