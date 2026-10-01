@@ -114,7 +114,7 @@ def people(n: int) -> str:
 
 app = FastAPI(title="Behind the Mask · live")
 # the page may be served from elsewhere (GitHub Pages) while this runs on the Spark: let it read /live/status
-ORIGINS = [o for o in os.environ.get("BTM_ORIGINS", "https://patanl.github.io").split(",") if o]
+ORIGINS = [o for o in os.environ.get("BTM_ORIGINS", "https://steerai.live,https://www.steerai.live,https://patanl.github.io").split(",") if o]
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET"], allow_headers=[])
 levels = json.loads((DIRS / "levels.json").read_text())
 # full strength per button: the "a lot" dial stop (a long monologue derails much faster than a single answer)

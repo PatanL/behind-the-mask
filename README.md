@@ -123,6 +123,10 @@ Variables) and re-run the Pages workflow. The page connects to `LIVE_URL/live/ws
 `/live/status` requests from the Pages origin (`BTM_ORIGINS`). If the live server is unreachable, the page simply
 opens on the ready-made answers.
 
+On a custom domain (ours is https://steerai.live): point the domain at GitHub Pages (A/AAAA records for the apex,
+a `www` CNAME to `<user>.github.io`), set it under Settings → Pages → Custom domain, and set the repository variable
+`PAGES_BASE` to `/`, since the site then lives at the root instead of `/<repo>/`.
+
 Funnel has an unpublished bandwidth limit and, measured, accepts 20 open connections per visitor address. Visitors
 past that on one address (many people on one venue's Wi-Fi), and viewers past `BTM_MAX_VIEWERS`, get the
 ready-made answers with a note. Past `BTM_MAX_FULL` viewers, new ones get a lighter stream a few seconds behind.

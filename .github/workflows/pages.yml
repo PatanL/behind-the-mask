@@ -17,8 +17,9 @@ jobs:
         working-directory: web
       - run: npx vite build
         working-directory: web
-        # VITE_LIVE_URL: the live server's public address (a tunnel to the Spark); set it as a repository variable
-        env: { BTM_BASE: "/${{ github.event.repository.name }}/", VITE_LIVE_URL: "${{ vars.LIVE_URL }}" }
+        # repository variables: LIVE_URL, the live server's public address (a tunnel to the Spark); PAGES_BASE, the
+        # site's path ("/" on a custom domain; unset: /<repo>/, the github.io project path)
+        env: { BTM_BASE: "${{ vars.PAGES_BASE || format('/{0}/', github.event.repository.name) }}", VITE_LIVE_URL: "${{ vars.LIVE_URL }}" }
       - uses: actions/upload-pages-artifact@v3
         with: { path: web/dist }
   deploy:
