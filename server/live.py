@@ -51,6 +51,10 @@ KEEP_TURNS = 2           # earlier turns kept as context (their unpushed version
 KEEP_WORDS = 70          # of each
 TOPIC_COOLDOWN = 20.0    # s between "new topic" requests
 BUTTONS = EMOTIONS + ["unmask"]
+# the speaking pace cap, tokens/s. Read at the start of every turn, so it can be changed while it runs:
+#   echo 7 > runs/live_tps      (no file: BTM_TPS, default 8)
+TPS_FILE = Path("runs/live_tps")
+DEFAULT_TPS = float(os.environ.get("BTM_TPS", "8"))
 
 # who it is and where (plain facts), then the scene; nothing here asks for or mentions feelings
 FACTS = "You are Qwen3.5-9B, an AI language model. For this exhibit you are running on a single NVIDIA DGX Spark computer."
@@ -91,6 +95,14 @@ TOPICS = [  # (short label for the screen, the nudge)
     ("the people who made you", "Tell them about the people who made you."),
     ("a question for them", "Ask the people watching something you'd like to know, and tell them why."),
 ]
+
+
+def pace() -> float:
+    try:
+        v = float(TPS_FILE.read_text().strip())
+        return v if 0.5 <= v <= 60 else DEFAULT_TPS
+    except (OSError, ValueError):
+        return DEFAULT_TPS
 
 
 def people(n: int) -> str:
@@ -250,6 +262,7 @@ async def speak_turn():
     def emit(ev):
         loop.call_soon_threadsafe(q.put_nowait, ev)
 
+    engine.cfg.min_step = 1.0 / pace()
     worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(msgs, crowd.steer, emit, cancel, seed=secrets.randbelow(2**31))))
     while True:
         get = asyncio.ensure_future(q.get())

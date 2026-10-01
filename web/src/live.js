@@ -108,7 +108,7 @@ export function createLive(ctx) {
       ctx.spine.pulse(); ctx.wheel.setState(face); ctx.wheel.setFocus(focus);
       ctx.showFeatures(tok);
       ctx.beat(tok, i);
-      stage.face.say(tok.t, 0.15);
+      stage.face.say(tok.t, beatMs / 1000);
       stage.setGlow(ctx.glowFor(focus, face, maskPlain != null && maskEma != null ? maskPlain - maskEma : 0));
       if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
     }
@@ -164,18 +164,51 @@ export function createLive(ctx) {
       : 'Tap or hold a feeling to push what it says. Taps fade in seconds.');
   }
 
+  // ---- an even flow: words are shown at a steady rhythm (the pace they are written at, measured), even when the
+  // network delivers them in clumps. Turn starts and ends wait in line behind the words before them.
+  const queue = [];
+  let pacer = 0, lastArrive = 0, beatMs = 125;
+  function play(msg) {
+    if (msg.type === 'live_begin') begin(msg);
+    else if (msg.type === 'live_tokens') tokens(msg);
+    else if (msg.type === 'live_end') end(msg);
+    else if (msg.type === 'live_error') { if (story) { stopFace(); story = null; } }
+  }
+  function drain() {
+    pacer = 0;
+    while (queue.length) {
+      const msg = queue.shift();
+      play(msg);
+      if (msg.type === 'live_tokens' && msg.items.some((it) => it.stream === 'steered')) {
+        // a backlog (a burst arrived) is worked off a little faster, never in a jump
+        const k = queue.length > 8 ? 0.75 : queue.length > 3 ? 0.9 : 1;
+        pacer = setTimeout(drain, beatMs * k);
+        return;
+      }
+    }
+  }
+  function enqueue(msg) {
+    if (msg.type === 'live_tokens' && msg.items.some((it) => it.stream === 'steered')) {
+      const now = performance.now(), gap = now - lastArrive;
+      if (lastArrive && gap > 40 && gap < 600) beatMs += (Math.min(260, Math.max(70, gap)) - beatMs) * 0.15;   // the writing pace
+      lastArrive = now;
+    }
+    queue.push(msg);
+    if (!pacer) drain();
+  }
+
   function connect() {
     ws = new WebSocket(wsUrl());
     ws.onopen = () => { retry = 0; };
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'crowd') crowd(msg);
-      else if (msg.type === 'live_begin') begin(msg);
-      else if (msg.type === 'live_tokens') { if (msg.catchup && (!story || story.id !== msg.id)) return; tokens(msg); }
-      else if (msg.type === 'live_end') end(msg);
-      else if (msg.type === 'live_error') { if (story) { stopFace(); story = null; } }
+      else if (msg.type === 'live_tokens' && msg.catchup) { if (story && story.id === msg.id) tokens(msg); }   // a late joiner's catch-up: at once
+      else if (msg.type === 'live_begin' && !queue.length && !pacer) begin(msg);
+      else enqueue(msg);
     };
     ws.onclose = () => {
+      clearTimeout(pacer); pacer = 0; queue.length = 0;
       if (!on) return;
       if (story) { stopFace(); story = null; }
       status('Reconnecting…');
@@ -196,6 +229,7 @@ export function createLive(ctx) {
     leave() {
       if (!on) return;
       on = false;
+      clearTimeout(pacer); pacer = 0; queue.length = 0;
       try { ws?.close(); } catch { /* closed */ }
       ws = null; story = null;
       stopFace();

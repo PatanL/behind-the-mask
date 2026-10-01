@@ -41,6 +41,7 @@ class GenConfig:
     # the counterfactual row starts exactly like the unpushed row, so read the prompt only for rows 0-1 and copy
     # row 0's cache into row 2 (a third less prefill work: a shorter pause before each new turn)
     share_prefill: bool = False
+    min_step: float = 0.0      # seconds per token at least: a pace cap (live), 0 = as fast as it runs
 
 
 def chat_prompt_ids(mind: Mind, text) -> list[int]:
@@ -161,7 +162,7 @@ class Engine:
             c_past = b_past = None
             c_in, b_in = c_ids, b_ids
             last = {}
-            t0 = time.time()
+            t0 = step_t = time.time()
             for step in range(cfg.max_new_tokens + 1):
                 if cancel is not None and cancel.is_set():
                     break
@@ -232,7 +233,9 @@ class Engine:
                 c_in = c_next[:, None]
                 if base is not None:
                     b_in = b_next[:, None]
-                time.sleep(cfg.step_delay)
+                # pace: at least min_step per token (measured from the previous token), plus any fixed delay
+                time.sleep(max(cfg.step_delay, cfg.min_step - (time.time() - step_t)))
+                step_t = time.time()
             emit({"type": "turn_end", "texts": {k: s.text for k, s in streams.items()}, "seconds": round(time.time() - t0, 2)})
             chat.set_coef(None)
             if base is not None:
