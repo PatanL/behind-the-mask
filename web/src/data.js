@@ -33,7 +33,7 @@ export function pushInfo(tok) {
   const tipped = tok.t.trim() !== '' && tok.p >= 0.08 && ratio >= 2.5 && cfTop !== tok.t;
   // underline only content words where the push flipped the favourite (function words shift too, but distract)
   const w = tok.t.trim().toLowerCase().replace(/[^a-z']/g, '');
-  const shown = tipped && w.length >= 3 && !STOP.has(w) && tok.p >= 0.12 && ratio >= 3;
+  const shown = tipped && w.length >= 4 && !STOP.has(w) && tok.p >= 0.2 && ratio >= 6;
   return { ratio, cfP: cf.p, cfExact: cf.exact, cfTop, pushed: tipped, shown };
 }
 

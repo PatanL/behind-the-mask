@@ -25,13 +25,13 @@ export class Speech {
   }
 
   /** tok: steered token; delta: {emotion: value 0..1} measured lift; focus: the push emotion (or null) */
-  add(i, tok, delta, focus, { swingMark = false } = {}) {
+  add(i, tok, delta, focus, { swingMark = false, instant = false, changed = false } = {}) {
     const parts = tok.t.split('\n');
     parts.forEach((part, k) => {
       if (k > 0) this.el.insertBefore(document.createElement('br'), this.caret);
       if (!part) return;
       const s = document.createElement('span');
-      s.className = 'tok new';
+      s.className = instant ? (changed ? 'tok changed' : 'tok') : 'tok new';
       s.dataset.i = i;
       s.textContent = part;
       // colour: only the pushed feeling, by how strongly it measures inside the model here (smoothed upstream)
@@ -46,9 +46,12 @@ export class Speech {
       if (swingMark && k === 0) s.classList.add('swing-mark');
       this.el.insertBefore(s, this.caret);
       this.spans[i] = s;
-      setTimeout(() => s.classList.remove('new'), 520);
+      if (!instant) setTimeout(() => s.classList.remove('new'), 520);
     });
-    this.el.scrollTop = this.el.scrollHeight;
+    if (instant) return;
+    // keep the newest line in view but let early lines stay visible as long as possible
+    const over = this.el.scrollHeight - this.el.clientHeight;
+    if (over > 0) this.el.scrollTo({ top: over, behavior: 'smooth' });
   }
 
   end() { this.caret?.remove(); this.caret = null; }

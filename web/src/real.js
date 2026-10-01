@@ -1,11 +1,15 @@
 // "Is the reading real?": graded sentences where only one thing changes (no steering). If the readout means
 // something, the watched feeling should rise as the danger / good news / annoyance grows.
 import { EMO } from './palette.js';
+import { DATA_DIR } from './data.js';
 
 export async function initRealSection(host) {
   let data = null;
-  try { const r = await fetch(`${import.meta.env.BASE_URL}performances/validation.json`); data = r.ok ? await r.json() : null; } catch { data = null; }
+  try { const r = await fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/validation.json`); data = r.ok ? await r.json() : null; } catch { data = null; }
   if (!data?.demos?.length) return;
+  // lead with the clearest effect (largest rise of the watched signal, assistant model)
+  const rise = (d) => { const v = (d.chat || []).map((r) => r.z[d.watch]); return v.length ? v[v.length - 1] - v[0] : 0; };
+  data.demos.sort((a, b) => rise(b) - rise(a));
   host.hidden = false;
   const pick = host.querySelector('.real-pick'), slider = host.querySelector('input[type=range]'), sent = host.querySelector('.real-sentence');
   const chart = host.querySelector('.real-chart'), note = host.querySelector('.real-note');
@@ -20,6 +24,7 @@ export async function initRealSection(host) {
   slider.oninput = draw;
   function draw() {
     const i = Number(slider.value), w = demo.watch, c = EMO[w].color;
+    slider.style.accentColor = c;
     const parts = demo.template.split('{}');
     sent.innerHTML = `${parts[0]}<b style="color:${c}">${demo.values[i]}</b>${parts[1] || ''}`;
     const series = (mind) => (demo[mind] || []).map((r) => r.z[w]);

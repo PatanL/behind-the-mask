@@ -33,13 +33,16 @@ export class FeelMap {
     ctx.beginPath(); ctx.arc(cx, cy, R * 0.5, 0, Math.PI * 2); ctx.stroke();
     if (!this.map) return;
     ctx.font = '11px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const e of ORDER) {
-      const [mx, my] = this.map[e];
-      const px = cx + mx * R, py = cy - my * R;
-      ctx.fillStyle = EMO[e].color; ctx.globalAlpha = this.focus && this.focus !== e ? 0.55 : 1;
-      ctx.beginPath(); ctx.arc(px, py, this.focus === e ? 4.5 : 3, 0, Math.PI * 2); ctx.fill();
-      const lx = cx + mx * (R + 1) * 0.86, ly = cy - my * (R + 1) * 0.86 + (my > 0 ? -10 : 10);
-      ctx.fillText(EMO[e].label, Math.max(22, Math.min(W - 22, lx)), Math.max(8, Math.min(H - 8, ly)));
+    // labels: push apart any that would overlap
+    const labs = ORDER.map((e) => { const [mx, my] = this.map[e]; return { e, px: cx + mx * R, py: cy - my * R, lx: cx + mx * R * 0.78, ly: cy - my * R * 0.78 }; });
+    for (let it = 0; it < 40; it++) for (let i = 0; i < labs.length; i++) for (let j = i + 1; j < labs.length; j++) {
+      const a = labs[i], b = labs[j], dx = b.lx - a.lx, dy = b.ly - a.ly;
+      if (Math.abs(dy) < 12 && Math.abs(dx) < 46) { const push = (12 - Math.abs(dy)) / 2 + 0.5, s = dy >= 0 ? 1 : -1; a.ly -= push * s; b.ly += push * s; }
+    }
+    for (const L of labs) {
+      ctx.fillStyle = EMO[L.e].color; ctx.globalAlpha = this.focus && this.focus !== L.e ? 0.55 : 1;
+      ctx.beginPath(); ctx.arc(L.px, L.py, this.focus === L.e ? 4.5 : 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillText(EMO[L.e].label, Math.max(24, Math.min(W - 24, L.lx)), Math.max(8, Math.min(H - 8, L.ly)));
     }
     ctx.globalAlpha = 1;
     this.dot.x += (this.target.x - this.dot.x) * 0.08; this.dot.y += (this.target.y - this.dot.y) * 0.08;

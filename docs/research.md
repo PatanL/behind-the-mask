@@ -3,6 +3,18 @@
 This exhibit is built entirely from published techniques. Each section says what we use, where it lives in
 the code, and what to read if you want to go deeper. The arXiv IDs below were checked against arXiv.
 
+## 0. What's new in this version (2026 research)
+
+| Technique | Paper | Where we use it |
+|---|---|---|
+| Emotion vectors from model-written stories; emotions as functional, causal representations | Anthropic, *Emotion concepts and their function in a large language model*, 2026. [transformer-circuits.pub/2026/emotions](https://transformer-circuits.pub/2026/emotions/index.html) | `server/build_vectors.py` (stories → mean activations → directions); the "is it real?" check mirrors their numerical-sensitivity test |
+| Generation-based extraction beats comprehension-based; emotions peak near 50% depth | Jeong, *Extracting and Steering Emotion Representations in Small Language Models*, 2026. [arXiv:2604.04064](https://arxiv.org/abs/2604.04064) | Extraction method and layer choice (16 of 32) |
+| The emotional latent space of LLMs | Reichman et al., *Emotions Where Art Thou*, ICLR 2026. [arXiv:2510.22042](https://arxiv.org/abs/2510.22042) | Background for the "feeling map" (a 2-D projection of the directions) |
+| The assistant axis: the leading direction of persona space; pushing away from it makes the model adopt other identities | Lu et al., *The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models*, 2026. [arXiv:2601.10387](https://arxiv.org/abs/2601.10387) | "Take off the mask" and the Mask meter (assistant answers minus 30 role-played personas) |
+| Sparse autoencoders for Qwen3.5 | Deng et al., *Qwen-Scope: Turning Sparse Features into Development Tools for Large Language Models*, 2026. [arXiv:2605.11887](https://arxiv.org/abs/2605.11887) | "Lighting up inside": the top layer-20 features per word |
+| Sparse autoencoders (background) | Cunningham et al. 2023, [arXiv:2309.08600](https://arxiv.org/abs/2309.08600); Gao et al. 2024 (TopK SAEs), [arXiv:2406.04093](https://arxiv.org/abs/2406.04093) | |
+| Naming features automatically | Paulo et al., *Automatically Interpreting Millions of Features in Large Language Models*, 2024. [arXiv:2410.13928](https://arxiv.org/abs/2410.13928) | `server/label_features.py` (top-activating excerpts → the model names each feature) |
+
 ## 1. Steering: adding a direction to the model's hidden state
 
 Language models keep a running internal state (the *residual stream*) as they read and write. Many concepts,
@@ -78,6 +90,7 @@ measured readout, not a measurement of anything the model feels.
 ## Honest limits
 - Emotion directions from contrastive prompts also pick up style, topic and framing. They are useful
   handles, not clean "emotion neurons".
-- Small models, like the 0.6B used for development, steer less cleanly than larger ones. The public exhibit
-  runs Qwen3-4B.
+- Small models steer less cleanly than larger ones. The exhibit runs Qwen3.5-9B. Its emotion directions
+  are not independent: anger and fear share about half their direction (cosine about 0.5).
+- Feature names are written by the model from a handful of examples. They are good guesses, not ground truth.
 - Too much steering breaks fluency. The dial ranges are capped using the sweeps in `server/calibrate.py`.

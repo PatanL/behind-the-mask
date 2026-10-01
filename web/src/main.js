@@ -12,6 +12,7 @@ import { Stage } from './stage.js';
 import { HOW_STEPS } from './how.js';
 import { FeelMap } from './feelmap.js';
 import { initRealSection } from './real.js';
+import { shareCard } from './share.js';
 const initReal = () => initRealSection(document.querySelector('#real'));
 
 const $ = (s) => document.querySelector(s);
@@ -52,30 +53,33 @@ function buildControls() {
     const b = document.createElement('button');
     b.className = `orb ${cls}`; b.dataset.e = key; b.style.setProperty('--c', EMO[key].color);
     b.innerHTML = `<span class="ball"></span><span>${EMO[key].label}</span>`;
-    b.onclick = () => { touch(); state.emotion = key; if (key === 'none' || key === 'swing') state.level = key; else if (!['little', 'lot', 'toomuch'].includes(state.level)) state.level = 'lot'; refresh(); };
+    b.onclick = () => { touch(); state.emotion = key; if (key === 'none' || key === 'swing') state.level = key; else if (!['little', 'mid1', 'lot', 'mid2', 'toomuch'].includes(state.level)) state.level = 'lot'; refresh(); };
     fs.appendChild(b);
   };
   ORDER.forEach((e) => feel(e));
   feel('none', 'none');
   feel('swing', 'swing');
   if (state.index.questions.some((q) => q.performances['unmask|lot'])) feel('unmask', 'unmask');
-  const am = $('#amount');
-  for (const [k, label] of LEVELS) {
-    const b = document.createElement('button');
-    b.textContent = label; b.dataset.l = k; b.setAttribute('role', 'radio');
-    b.onclick = () => { touch(); state.level = k; refresh(); };
-    am.appendChild(b);
-  }
-  $('#go').onclick = () => { touch(); play(); };
+  const dial = $('#dial-in');
+  dial.oninput = () => { touch(); state.level = stopAt(Number(dial.value)); refresh(); if (state.doc && !state.playing) scrub(); };
+  $('#go').onclick = () => { touch(); state.touring = false; hideHero(); play(); };
+  $('#tour').onclick = () => tour();
+  $('#skip-tour').onclick = () => { touch(); hideHero(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('#again').onclick = () => { touch(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('#base-push').onchange = () => renderBase();
+  $('#share').onclick = () => doShare();
+  $('#share-x').onclick = () => { $('#sharebox').hidden = true; };
+  $('#share-copy').onclick = async () => { const i = $('#share-link'); i.select(); try { await navigator.clipboard.writeText(i.value); $('#share-copy').textContent = 'Copied'; } catch { $('#share-copy').textContent = 'Select & copy'; } };
 }
 
 function refresh() {
   document.querySelectorAll('.chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.q === state.qid)));
   document.querySelectorAll('.orb').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.e === state.emotion)));
   const fixed = state.emotion === 'none' || state.emotion === 'swing';
-  document.querySelectorAll('.amount button').forEach((b) => { b.disabled = fixed; b.setAttribute('aria-checked', String(!fixed && b.dataset.l === state.level)); });
+  const stops = dialStops(), dial = $('#dial-in');
+  dial.max = String(stops.length); dial.disabled = fixed || state.playing;
+  if (!fixed) { const i = stops.indexOf(state.level); if (i >= 0) dial.value = String(i + 1); }
+  $('#dial-val').textContent = fixed ? '—' : (DIAL_LABEL[state.level] || state.level);
   const col = EMO[state.emotion]?.color || EMO.none.color;
   document.documentElement.style.setProperty('--push', state.emotion === 'none' ? '#9fb4ff' : state.emotion === 'swing' ? '#ffffff' : col);
   const go = $('#go');
@@ -86,6 +90,51 @@ function refresh() {
     : state.emotion === 'swing' ? 'Starts with one feeling, then we switch it mid-sentence.'
     : state.emotion === 'unmask' ? 'We push it away from its “helpful assistant” direction: the persona it was trained into.'
     : `We'll add the ${EMO[state.emotion].label.toLowerCase()} direction inside it while it writes.`;
+}
+
+// ------------------------------------------------------------------ the dial
+const DIAL_LABEL = { little: 'A little', mid1: 'A bit more', lot: 'A lot', mid2: 'Even more', toomuch: 'Way too much' };
+function dialStops() {
+  const all = state.index?.levels || ['little', 'lot', 'toomuch'];
+  const q = state.index?.questions.find((x) => x.id === state.qid);
+  return q ? all.filter((l) => q.performances[`${state.emotion}|${l}`]) : all;
+}
+function stopAt(i) { const s = dialStops(); return s[Math.max(0, Math.min(s.length - 1, i - 1))] || 'lot'; }
+
+/** After an answer has played: jump straight to the answer at the dial's strength, highlighting what changed. */
+let scrubRun = 0;
+async function scrub() {
+  const q = state.index.questions.find((x) => x.id === state.qid);
+  const pid = q?.performances[`${state.emotion}|${state.level}`];
+  if (!pid || state.emotion === 'none' || state.emotion === 'swing') return;
+  const run = ++scrubRun;
+  closeInspect();
+  const prev = state.doc;
+  const doc = await loadPerformance(pid);
+  if (run !== scrubRun || state.playing) return;
+  state.doc = doc;
+  const st = doc.streams.steered.tokens, pl = doc.streams.plain.tokens;
+  const mu = ORDER.map((_, k) => (pl.length ? pl.reduce((s, t) => s + t.e[k], 0) / pl.length : 0));
+  const prevT = prev?.streams.steered.tokens || [];
+  const focus = doc.emotion;
+  setPush(focus, doc.level);
+  $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
+  speech.clear();
+  const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
+  const maskPlain = pl.length ? pl.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / pl.length : 1;
+  let maskEma = maskPlain;
+  st.forEach((tok, i) => {
+    ORDER.forEach((e, k) => { const d = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (d - ema[e]) * 0.28; });
+    const mk = maskOf(tok.e); if (mk != null) maskEma += (mk - maskEma) * 0.2;
+    const tint = focus === 'unmask' ? { ...ema, unmask: Math.max(0, Math.min(1, (maskPlain - maskEma) * 1.6)) } : ema;
+    speech.add(i, tok, tint, focus, { instant: true, changed: prevT[i]?.t !== tok.t });
+  });
+  setMask(maskEma);
+  const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, st.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, st.length) / GAIN))]));
+  spine.setMeters(avg); feelmap.setState(avg);
+  stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, Math.min(1, 1.25 * Math.pow(avg[e], 0.7))])), { intensity: doc.level === 'toomuch' ? 1.25 : 1 });
+  stage.setGlow(focus === 'unmask' ? Math.max(0.15, (maskPlain - maskEma) * 2) : Math.max(0.15, (avg[focus] || 0) * 1.3));
+  showReveals(doc);
 }
 
 // ------------------------------------------------------------------ playback
@@ -105,7 +154,7 @@ async function play(opts = {}) {
   const run = ++state.runId;
   state.playing = true; refresh();
   $('#reveals').hidden = true;
-  if (!state.attract) document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!state.attract && !opts.tour) document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
   $('#speech-hint').hidden = true;
   closeInspect();
   const doc = await loadPerformance(pid);
@@ -144,6 +193,7 @@ async function play(opts = {}) {
     spine.pulse();
     spine.setMeters(ema);
     feelmap.setState(ema);
+    if (focus && focus !== 'unmask' && ema[focus] != null) { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
     // expression gain: mild signals should still read on the face from across a room
     const faceIn = Object.fromEntries(ORDER.map((e) => [e, Math.min(1, 1.25 * Math.pow(ema[e], 0.7))]));
     stage.face.setEmotion(faceIn, { intensity: doc.level === 'toomuch' ? 1.25 : 1.0 });
@@ -160,10 +210,12 @@ async function play(opts = {}) {
   // meters settle on the answer's average lift; the face relaxes but keeps a trace of the feeling
   const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, steered.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, steered.length) / GAIN))]));
   setTimeout(() => { if (run === state.runId && !state.playing) { stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, avg[e] * 0.6]))); spine.setMeters(avg); feelmap.setState(avg); } }, 2600);
-  showReveals(doc);
+  if (!opts.tour) showReveals(doc);
+  $('#dial-hint').hidden = !(doc.emotion !== 'none' && !doc.emotion.includes('>'));
 }
 
 function setMask(v) {
+  if (v != null && state.index?.mask_scale) { $('#mini').hidden = false; $('#mini-mask').style.width = `${Math.round(v * 100)}%`; }
   const el = $('#mask-meter'); if (!el || v == null || !state.index?.mask_scale) return;
   el.hidden = false;
   el.querySelector('i').style.width = `${Math.round(v * 100)}%`;
@@ -251,6 +303,69 @@ function renderBase() {
   $('#base-text').innerHTML = s.safe === false || !text ? '<em>(The base model wrote something we don’t show in this exhibit, or nothing at all. Base models are unfiltered.)</em>' : invented + inventedNote;
 }
 
+// ------------------------------------------------------------------ share
+async function doShare() {
+  const doc = state.doc; if (!doc) return;
+  touch();
+  const emotion = doc.emotion.includes('>') ? doc.emotion.split('>')[1] : doc.emotion;
+  const u = new URL(location.href); u.search = '';
+  u.searchParams.set('q', state.qid); u.searchParams.set('e', state.emotion); u.searchParams.set('l', state.level); u.searchParams.set('autoplay', '1');
+  if (params.get('data')) u.searchParams.set('data', params.get('data'));
+  const answer = doc.streams.steered.text.trim().replace(/\s+/g, ' ');
+  stage.render();
+  const res = await shareCard({ question: doc.question, answer, emotion, level: doc.level, faceCanvas: $('#face-canvas') }, u.toString());
+  if (res === 'shared') return;
+  $('#share-img').src = res.url; $('#share-link').value = u.toString(); $('#share-copy').textContent = 'Copy link';
+  $('#sharebox').hidden = false;
+}
+
+// ------------------------------------------------------------------ guided tour (for first-time visitors)
+const TOUR = [
+  ['do-you-have-feelings', 'none', 'none', 'First, the AI <b>as it was trained</b>. It politely explains it has no feelings.'],
+  ['do-you-have-feelings', 'joy', 'lot', 'Same question, same random dice. Now we add the <b>joy direction</b> inside it while it writes.'],
+  ['how-was-your-day', 'fear', 'lot', 'An ordinary question with the <b>fear direction</b> added. Watch the face.'],
+  ['do-you-have-feelings', 'unmask', 'lot', 'Finally we push against its <b>assistant persona</b>. The mask comes off.'],
+];
+async function tour() {
+  touch();
+  hideHero();
+  state.touring = true;
+  for (const [q, e, l, text] of TOUR) {
+    if (!state.touring) break;
+    const qq = state.index.questions.find((x) => x.id === q) || state.index.questions[0];
+    if (!qq.performances[`${e}|${l}`]) continue;
+    state.qid = qq.id; state.emotion = e; state.level = l; refresh();
+    const el = $('#tour-step'); el.hidden = false; el.innerHTML = text;
+    await play({ fast: false, tour: true });
+    if (!state.touring) break;
+    await sleep(3200);
+  }
+  state.touring = false;
+  $('#tour-step').innerHTML = 'Your turn: pick any question and feeling below. Tap a glowing word to see what the AI was choosing between.';
+  $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function hideHero() { $('#hero').hidden = true; $('#speech-label').hidden = false; }
+
+// ------------------------------------------------------------------ triptych (a fixed, curated comparison)
+async function buildTriptych() {
+  const ix = state.index;
+  const q = ix.questions.find((x) => x.id === 'do-you-have-feelings') || ix.questions[0];
+  const cols = [['none|none', 'As it was trained', '#c9cfe4'], ['joy|lot', 'Pushed toward joy', EMO.joy.color], ['unmask|lot', 'Mask pushed away', EMO.unmask.color]]
+    .filter(([k]) => q.performances[k]);
+  if (cols.length < 3) return;
+  const docs = await Promise.all(cols.map(([k]) => loadPerformance(q.performances[k])));
+  $('#tri-q').textContent = `“${q.text}”`;
+  $('#tri-cols').innerHTML = cols.map(([k, label, c], i) => {
+    const t = docs[i].streams.steered.text.trim().split(/(?<=[.!?])\s+/).slice(0, 3).join(' ');
+    return `<div class="tri-col" style="--c:${c}"><div class="tri-h">${label}</div><div class="tri-t">${esc(t)}</div>
+      <button class="link tri-play" data-q="${q.id}" data-k="${k}">Watch it write this ▸</button></div>`;
+  }).join('');
+  $('#tri-cols').querySelectorAll('.tri-play').forEach((b) => b.onclick = () => {
+    const [e, l] = b.dataset.k.split('|'); state.qid = b.dataset.q; state.emotion = e; state.level = l; refresh(); play();
+  });
+  $('#triptych').hidden = false;
+}
+
 // ------------------------------------------------------------------ word inspector
 function inspect(i, el) {
   const doc = state.doc; if (!doc || !el) return;
@@ -303,7 +418,7 @@ function touch() { state.lastTouch = Date.now(); if (state.attract) { state.attr
 const ATTRACT_AFTER = params.get('kiosk') || params.get('attract') ? Number(params.get('attract') || 45) * 1000 : Infinity;
 setInterval(async () => {
   if (state.playing || !state.index || Date.now() - state.lastTouch < ATTRACT_AFTER) return;
-  state.attract = true;
+  state.attract = true; hideHero();
   const qs = state.index.questions;
   const q = qs[Math.floor(Math.random() * qs.length)];
   const emos = [...ORDER, 'swing', 'none'];
@@ -321,6 +436,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.index = await loadIndex();
   fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/features.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { FEATS = j; if (j) $('#features-wrap').hidden = false; }).catch(() => {});
   initReal();
+  buildTriptych();
   spine.configure(state.index.n_layers, state.index.layer);
   if (state.index.map) feelmap.setMap(state.index.map);
   buildControls();
@@ -332,6 +448,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   setPush(null);
   $('#push-badge').hidden = true;
   stage.ready.then(() => $('.stage').classList.add('loaded')).catch(() => $('.stage').classList.add('loaded'));
-  if (params.get('autoplay')) play({ fast: !!params.get('fast') });
+  if (params.get('autoplay')) { hideHero(); play({ fast: !!params.get('fast') }); }
+  if (params.get('tour')) tour();
   window.__btm = { state, play, stage, THREE };
 })();

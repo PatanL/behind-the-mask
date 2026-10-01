@@ -20,15 +20,27 @@ live. Then the exhibit shows you:
 
 ## How it works (short version)
 
-1. **Directions.** We have Qwen3-4B read the same neutral sentences framed as *overjoyed*, *heartbroken*,
-   *furious*, … and average its hidden state (residual stream) at the middle layer. Each emotion's direction
-   is its average minus the average over all framings. This is *contrastive activation addition*.
-   (`server/steer.py`)
-2. **Steering.** While it writes, we add `coefficient × typical_activation_size × direction` to the residual
-   stream at that layer, for every token. (`Mind.install`)
-3. **Readout.** Before adding anything, we project the model's own state onto each direction. This is the
-   live signal that drives the face and colours, shown relative to the unpushed answer. (`Mind.readout`)
-4. **Fair comparisons.** Several copies run in lock-step with shared sampling noise (Gumbel-max):
+1. **Emotion directions, from stories the model writes itself.** Qwen3.5-9B writes 216 short first-person
+   stories about characters who feel joy, sadness, anger, fear, calm or curiosity, plus neutral ones. While
+   it writes, we average its residual stream at the middle layer (16 of 32). Each emotion's direction is its
+   average minus the average over all stories. This follows Anthropic's 2026 emotion-concept work, and
+   generation-based extraction is the method a 2026 comparison found most reliable. (`server/build_vectors.py`)
+2. **The assistant axis ("the mask").** The model answers the same questions as itself and as 30 role-played
+   characters. The difference between the two is its *assistant direction* (Lu et al. 2026). Pushing against
+   it is the exhibit's "Take off the mask". The **Mask** meter shows where the live state sits between the
+   two (0% = like the role-played characters, 100% = like its own assistant voice).
+3. **Steering.** While it writes, we add `coefficient × typical activation size × direction` to the residual
+   stream at that layer, for every token. Strengths were picked from a sweep of effect vs fluency.
+   (`server/steer.py`, `server/sweep.py`)
+4. **Readout.** Before adding anything, we project the model's own state onto each direction. That live
+   signal drives the face and the colours, shown relative to the unpushed answer. "Is the reading real?"
+   checks it with no steering at all: change one detail in a sentence and the matching signal follows.
+   (`server/validate.py`)
+5. **Sparse features (Qwen-Scope).** Qwen's sparse autoencoder splits the layer-20 state into 65,536
+   features, about 50 of them active at a time. The model names the ones that appear, from the text that
+   triggers each most (automated interpretability), and the exhibit shows a few per word.
+   (`server/label_features.py`)
+6. **Fair comparisons.** Several copies run in lock-step with shared sampling noise (Gumbel-max):
    - the assistant as trained
    - the assistant with the push
    - the base model, with and without the push
@@ -36,8 +48,8 @@ live. Then the exhibit shows you:
      have said instead"
 
    (`server/engine.py`)
-5. **Pre-computed show.** Every question × feeling × amount is generated once (`server/precompute.py`), so
-   the public site is static, instant, and works for any number of visitors at once.
+7. **Pre-computed show.** Every question × feeling × dial stop is generated once (`server/precompute.py`),
+   so the public site is static, instant, and works for any number of visitors.
 
 The full list of papers and techniques, with what we use from each, is in **[docs/research.md](docs/research.md)**.
 
@@ -47,7 +59,9 @@ The full list of papers and techniques, with what we use from each, is in **[doc
 |---|---|
 | `server/steer.py` | emotion directions, steering hook, readout |
 | `server/engine.py` | lock-step generation of all streams with per-token data |
-| `server/calibrate.py`, `server/sweep.py` | compute directions; sweep steering strength vs effect and fluency |
+| `server/build_vectors.py` | story-based emotion directions + the assistant axis |
+| `server/sweep.py`, `server/validate.py` | steering strength vs effect/fluency; the no-steering "is it real?" check |
+| `server/label_features.py` | names Qwen-Scope SAE features (automated interpretability) |
 | `server/precompute.py` | generate every performance the exhibit can show |
 | `server/app.py` | optional live server (queue, live dials, moderation) |
 | `web/` | the exhibit (Vite + three.js), including the porcelain android face (`web/src/face/`) |
@@ -62,14 +76,16 @@ The exhibit site is static:
 cd web && npm install && npm run dev      # http://127.0.0.1:5173
 ```
 
-Regenerate everything on an NVIDIA GPU. We used a DGX Spark; any GPU with about 24 GB will do.
+Regenerate everything on an NVIDIA GPU. We used a DGX Spark; you need about 45 GB of GPU memory, since the 9B chat and base models are loaded together.
 
 ```bash
 docker build -t btm-server server/
-docker run --rm --gpus all -v ~/.cache/huggingface:/root/.cache/huggingface -v $PWD/server:/app -v $PWD/runs:/app/runs \
-  btm-server python calibrate.py --chat Qwen/Qwen3-4B-Instruct-2507 --base Qwen/Qwen3-4B-Base --out runs/q4b
-docker run ... btm-server python sweep.py --dirs runs/q4b --chat Qwen/Qwen3-4B-Instruct-2507 --base Qwen/Qwen3-4B-Base
-docker run ... -v $PWD/web/public/performances:/perf btm-server python precompute.py --dirs runs/q4b --out /perf
+R="docker run --rm --gpus all --ipc=host -v ~/.cache/huggingface:/root/.cache/huggingface -v $PWD/server:/app -v $PWD/runs:/app/runs -v $PWD/web/public/performances:/perf btm-server"
+$R python build_vectors.py --out runs/q9b                 # ~10 min
+$R python sweep.py --dirs runs/q9b                         # pick strengths -> runs/q9b/levels.json
+$R python validate.py --dirs runs/q9b --out /perf
+$R python precompute.py --dirs runs/q9b --out /perf --sae <layer20.sae.pt> --sae-layer 20
+$R python label_features.py --perf /perf --sae <layer20.sae.pt> --layer 20
 ```
 
 ## Models, data and licences
@@ -77,7 +93,8 @@ docker run ... -v $PWD/web/public/performances:/perf btm-server python precomput
 | Component | Licence |
 |---|---|
 | Code in this repository | MIT (see `LICENSE`) |
-| Qwen3-4B-Instruct-2507, Qwen3-4B-Base (Alibaba Qwen) | Apache-2.0 |
+| Qwen3.5-9B, Qwen3.5-9B-Base (Alibaba Qwen) | Apache-2.0 |
+| Qwen-Scope SAEs (`Qwen/SAE-Res-Qwen3.5-9B-Base-W64K-L0_50`) | Apache-2.0 (see its model card for usage terms) |
 | ICT-FaceKit face model (USC Institute for Creative Technologies) | MIT |
 | `SamLowe/roberta-base-go_emotions` (text emotion scores) | MIT |
 | `unitary/toxic-bert` (safety filter) | Apache-2.0 |

@@ -33,7 +33,8 @@ ap.add_argument('--redo-withheld', action='store_true', help='only regenerate pe
 a = ap.parse_args()
 D, OUT = Path(a.dirs), Path(a.out)
 OUT.mkdir(parents=True, exist_ok=True)
-levels = json.loads((D / 'levels.json').read_text())  # {emotion: {little: c, lot: c, toomuch: c}}
+levels = json.loads((D / 'levels.json').read_text())  # {emotion: {little: c, [mid1], lot: c, [mid2], toomuch: c}}
+LEVELS = list(next(iter(levels.values())).keys())     # dial stops, weakest first
 chat = load_mind('chat', a.chat, True); chat.load(D / 'chat_dirs.pt')
 base = load_mind('base', a.base, False); base.load(D / 'base_dirs.pt')
 if a.sae:

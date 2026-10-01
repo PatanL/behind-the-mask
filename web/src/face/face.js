@@ -16,6 +16,7 @@
 // silent mouthing while writing, per-side asymmetry. Everything random comes from a seeded PRNG.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 export const EMOTIONS = ['joy', 'sadness', 'anger', 'fear', 'calm', 'curiosity', 'surprise', 'disgust'];
 
@@ -365,7 +366,7 @@ export class AndroidFace {
 
   // -------------------------------------------------------------------------------- loading
   async _load(url) {
-    const gltf = await new GLTFLoader().loadAsync(url);
+    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url);
     this.gltf = gltf;
     const model = gltf.scene;
     this.root.add(model);

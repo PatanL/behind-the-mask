@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.goto('http://127.0.0.1:5190/?data=performances9&q=do-you-have-feelings&e=unmask&l=lot&autoplay=1&fast=1');
+await page.waitForFunction(() => window.__btm && window.__btm.state.doc && !window.__btm.state.playing, null, { timeout: 120000 });
+await page.waitForTimeout(800);
+await page.locator('#share').click();
+await page.waitForSelector('#sharebox:not([hidden])', { timeout: 10000 });
+await page.waitForTimeout(500);
+const src = await page.$eval('#share-img', (i) => i.src);
+const b64 = await page.evaluate(async (src) => { const r = await fetch(src); const b = await r.blob(); return await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(',')[1]); fr.readAsDataURL(b); }); }, src);
+(await import('node:fs')).writeFileSync('../runs/share_card.png', Buffer.from(b64, 'base64'));
+console.log('link', await page.$eval('#share-link', (i) => i.value), 'errors', errs);
+await browser.close();
