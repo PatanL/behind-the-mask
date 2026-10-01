@@ -5,14 +5,12 @@ behind its friendly assistant persona.**
 
 A porcelain android answers your question. You choose a feeling and how hard to push. We add that
 feeling's *direction* inside the model while it writes. The words, the colours and the face all change,
-live. Then the exhibit shows you:
+live, and the face mouths the words as they appear. Beside it:
 
-- **Without the push:** the same AI, same question, same random dice, no steering. You see exactly where
-  the two answers split.
-- **Behind the mask:** the *base model*, the same kind of network before it was trained (with RLHF) to act
-  as a helpful assistant.
-- **Its decisions:** tap any word to see what the AI was choosing between, and how much the push tilted the
-  odds.
+- **The Mask:** how much its hidden state still sounds like its trained assistant self.
+- **How it feels inside:** six petals that grow with the feeling read from its hidden state.
+- **Its decisions:** tap any word to see what the AI was choosing between, with and without the push, and how
+  much the push tilted the odds.
 - **Live, with everyone:** when the live server runs, everyone on the page steers *one* AI together. It
   writes a short story while visitors tap (or hold) feeling buttons, and each word is written with the mix of
   everyone's recent taps. When the story ends, you see the same story written with nobody pushing.

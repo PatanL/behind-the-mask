@@ -1,19 +1,12 @@
 // "Inside the AI": the stack of layers, where the push enters, and live pulses per written word-piece.
-import { EMO, ORDER } from './palette.js';
+import { EMO } from './palette.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 export class Spine {
-  constructor(svg, meters) {
-    this.svg = svg; this.meters = meters; this.pulses = [];
+  constructor(svg) {
+    this.svg = svg; this.pulses = [];
     this.nLayers = 36; this.layer = 18; this.color = EMO.none.color;
     this.build();
-    ORDER.forEach((e) => {
-      const m = document.createElement('div');
-      m.className = 'meter'; m.style.setProperty('--c', EMO[e].color);
-      m.innerHTML = `<span>${EMO[e].label}</span><div class="bar"><i></i></div>`;
-      meters.appendChild(m);
-    });
-    this.bars = [...meters.querySelectorAll('.bar i')];
     requestAnimationFrame((t) => this.tick(t));
   }
   configure(nLayers, layer) { this.nLayers = nLayers; this.layer = layer; this.build(); }
@@ -29,15 +22,15 @@ export class Spine {
       g.appendChild(e);
     }
     s.appendChild(g); this.rings = [...g.children];
-    const lab = (y, txt, anchor = 'middle') => { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', 60); t.setAttribute('y', y); t.setAttribute('text-anchor', anchor); t.setAttribute('fill', '#6b7290'); t.setAttribute('font-size', 13); t.textContent = txt; s.appendChild(t); return t; };
-    lab(bot + 18, 'words in');
-    lab(top - 12, 'next word out');
+    const lab = (y, txt, anchor = 'middle') => { const t = document.createElementNS(NS, 'text'); t.setAttribute('x', 60); t.setAttribute('y', y); t.setAttribute('text-anchor', anchor); t.setAttribute('fill', '#8a90aa'); t.setAttribute('font-size', 21); t.textContent = txt; s.appendChild(t); return t; };
+    lab(bot + 26, 'words in');
+    lab(top - 14, 'next word out');
     this.inj = document.createElementNS(NS, 'ellipse');
     this.inj.setAttribute('cx', 60); this.inj.setAttribute('cy', this.y(this.layer)); this.inj.setAttribute('rx', 44); this.inj.setAttribute('ry', 6);
     this.inj.setAttribute('fill', 'none'); this.inj.setAttribute('stroke-width', 2.5);
     s.appendChild(this.inj);
     this.injLabel = document.createElementNS(NS, 'text');
-    this.injLabel.setAttribute('x', 60); this.injLabel.setAttribute('y', this.y(this.layer) - 12); this.injLabel.setAttribute('text-anchor', 'middle'); this.injLabel.setAttribute('font-size', 13); this.injLabel.setAttribute('font-weight', '600');
+    this.injLabel.setAttribute('x', 60); this.injLabel.setAttribute('y', this.y(this.layer) - 14); this.injLabel.setAttribute('text-anchor', 'middle'); this.injLabel.setAttribute('font-size', 22); this.injLabel.setAttribute('font-weight', '600');
     s.appendChild(this.injLabel);
     this.setPush(null);
   }
@@ -55,7 +48,6 @@ export class Spine {
     this.svg.appendChild(c);
     this.pulses.push({ el: c, t0: performance.now() });
   }
-  setMeters(values) { ORDER.forEach((e, i) => { this.bars[i].style.width = `${Math.round(Math.max(0, Math.min(1, values[e] || 0)) * 100)}%`; }); }
   tick(t) {
     const dur = 520;
     this.pulses = this.pulses.filter((p) => {

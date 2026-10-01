@@ -9,7 +9,7 @@ the code, and what to read if you want to go deeper. The arXiv IDs below were ch
 |---|---|---|
 | Emotion vectors from model-written stories; emotions as functional, causal representations | Anthropic, *Emotion concepts and their function in a large language model*, 2026. [transformer-circuits.pub/2026/emotions](https://transformer-circuits.pub/2026/emotions/index.html) | `server/build_vectors.py` (stories → mean activations → directions); the "is it real?" check mirrors their numerical-sensitivity test |
 | Generation-based extraction beats comprehension-based; emotions peak near 50% depth | Jeong, *Extracting and Steering Emotion Representations in Small Language Models*, 2026. [arXiv:2604.04064](https://arxiv.org/abs/2604.04064) | Extraction method and layer choice (16 of 32) |
-| The emotional latent space of LLMs | Reichman et al., *Emotions Where Art Thou*, ICLR 2026. [arXiv:2510.22042](https://arxiv.org/abs/2510.22042) | Background for the "feeling map" (a 2-D projection of the directions) |
+| The emotional latent space of LLMs | Reichman et al., *Emotions Where Art Thou*, ICLR 2026. [arXiv:2510.22042](https://arxiv.org/abs/2510.22042) | Background for the emotion directions as a space |
 | The assistant axis: the leading direction of persona space; pushing away from it makes the model adopt other identities | Lu et al., *The Assistant Axis: Situating and Stabilizing the Default Persona of Language Models*, 2026. [arXiv:2601.10387](https://arxiv.org/abs/2601.10387) | "Take off the mask" and the Mask meter (assistant answers minus 30 role-played personas) |
 | Sparse autoencoders for Qwen3.5 | Deng et al., *Qwen-Scope: Turning Sparse Features into Development Tools for Large Language Models*, 2026. [arXiv:2605.11887](https://arxiv.org/abs/2605.11887) | "Lighting up inside": the top layer-20 features per word |
 | Sparse autoencoders (background) | Cunningham et al. 2023, [arXiv:2309.08600](https://arxiv.org/abs/2309.08600); Gao et al. 2024 (TopK SAEs), [arXiv:2406.04093](https://arxiv.org/abs/2406.04093) | |
@@ -124,8 +124,8 @@ which feeling was pushed and how hard (`web/scripts/fit-decoder.mjs`). With no p
 - Too much steering breaks fluency. The dial ranges are capped using the sweeps in `server/calibrate.py`.
 - The face's decoder is fitted on our own pushes, so it shows the feeling that was pushed more cleanly than
   the raw readout does. It is an intervention-trained display decoder: it recovers which push was applied,
-  on the same runs it was fitted on. It is not an independently validated emotion sensor. The colours and
-  meters still show the raw readout.
+  on the same runs it was fitted on. It is not an independently validated emotion sensor. The face and the
+  "How it feels inside" wheel use it; the word colours still show the raw readout.
 - The polite mask and the leaks are a scripted performance, driven by the Mask meter. They show the idea of
   a trained persona covering what is underneath. They are not evidence that the model hides real feelings.
 - Output is not filtered. Strong pushes (mostly anger) can make the model abusive; that is part of what

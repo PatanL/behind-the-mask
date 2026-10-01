@@ -20,7 +20,7 @@ export async function liveStatus() {
 }
 
 /**
- * ctx: { $, stage, speech, spine, feelmap, faceFrom, maskOf, setMask, showFeatures, labels: () => string[],
+ * ctx: { $, stage, speech, spine, wheel, faceFrom, maskOf, setMask, showFeatures, glowFor, labels: () => string[],
  *        setDoc(doc), beat(tok, i) }
  */
 export function createLive(ctx) {
@@ -105,11 +105,11 @@ export function createLive(ctx) {
     speech.add(i, tok, tint, focus, { instant });
     if (!instant) {
       stage.face.setEmotion(face);
-      ctx.spine.pulse(); ctx.spine.setMeters(ema); ctx.feelmap.setState(ema);
+      ctx.spine.pulse(); ctx.wheel.setState(face); ctx.wheel.setFocus(focus);
       ctx.showFeatures(tok);
       ctx.beat(tok, i);
       stage.face.say(tok.t, 0.15);
-      stage.setGlow(Math.max(0.15, Math.min(1, (focus === 'unmask' ? tint.unmask : focus ? ema[focus] : 0) * 1.3)));
+      stage.setGlow(ctx.glowFor(focus, face, maskPlain != null && maskEma != null ? maskPlain - maskEma : 0));
       if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
     }
   }

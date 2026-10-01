@@ -177,9 +177,16 @@ async def tell_story():
     def emit(ev):
         loop.call_soon_threadsafe(q.put_nowait, ev)
 
-    worker = loop.run_in_executor(None, lambda: engine.run(prompt, crowd.steer, emit, seed=secrets.randbelow(2**31)))
+    worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(prompt, crowd.steer, emit, seed=secrets.randbelow(2**31))))
     while True:
-        ev = await q.get()
+        get = asyncio.ensure_future(q.get())
+        done, _ = await asyncio.wait({get, worker}, return_when=asyncio.FIRST_COMPLETED)
+        if get not in done:            # the worker ended without its turn_end (it crashed): stop waiting
+            get.cancel()
+            if q.empty():
+                break
+            continue
+        ev = get.result()
         if ev["type"] == "turn_end":
             break
         if ev["type"] != "tokens":

@@ -10,7 +10,7 @@ import { Speech } from './speech.js';
 import { Spine } from './spine.js';
 import { Stage } from './stage.js';
 import { HOW_STEPS } from './how.js';
-import { FeelMap } from './feelmap.js';
+import { FeelWheel } from './wheel.js';
 import { initRealSection } from './real.js';
 import { shareCard } from './share.js';
 import { createLive, liveStatus } from './live.js';
@@ -54,8 +54,8 @@ function maskOf(z, mind = 'chat') {
 }
 
 const stage = new Stage($('#face-canvas'));
-const spine = new Spine($('#spine'), $('#meters'));
-const feelmap = new FeelMap($('#feelmap'));
+const spine = new Spine($('#spine'));
+const wheel = new FeelWheel($('#wheel'));
 const speech = new Speech($('#speech'), { onPick: (i, el) => inspect(i, el) });
 
 // ------------------------------------------------------------------ controls
@@ -88,8 +88,6 @@ function buildControls() {
   $('#go').onclick = () => { touch(); state.touring = false; hideHero(); play(); };
   $('#tour').onclick = () => tour();
   $('#skip-tour').onclick = () => { touch(); hideHero(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  $('#again').onclick = () => { touch(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  $('#base-push').onchange = () => renderBase();
   $('#share').onclick = () => doShare();
   $('#share-x').onclick = () => { $('#sharebox').hidden = true; };
   $('#share-copy').onclick = async () => { const i = $('#share-link'); i.select(); try { await navigator.clipboard.writeText(i.value); $('#share-copy').textContent = 'Copied'; } catch { $('#share-copy').textContent = 'Select & copy'; } };
@@ -154,11 +152,11 @@ async function scrub() {
     speech.add(i, tok, tint, focus, { instant: true, changed: prevT[i]?.t !== tok.t });
   });
   setMask(maskEma);
-  const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, st.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, st.length) / GAIN))]));
-  spine.setMeters(avg); feelmap.setState(avg);
-  stage.face.setEmotion(faceFrom(liftOf(st, mu)), { intensity: doc.level === 'toomuch' ? 1.15 : 1 });
-  stage.setGlow(focus === 'unmask' ? Math.max(0.15, (maskPlain - maskEma) * 2) : Math.max(0.15, (avg[focus] || 0) * 1.3));
-  showReveals(doc);
+  const shown = faceFrom(liftOf(st, mu));
+  wheel.setState(shown); wheel.setFocus(focus === 'none' ? null : focus);
+  stage.face.setEmotion(shown, { intensity: doc.level === 'toomuch' ? 1.15 : 1 });
+  stage.setGlow(glowFor(focus, shown, maskPlain - maskEma));
+  afterAnswer(doc);
 }
 
 // ------------------------------------------------------------------ playback
@@ -195,7 +193,7 @@ async function play(opts = {}) {
     feed = arrayFeed(doc.streams.steered.tokens);
   }
   state.playing = true; refresh();
-  $('#reveals').hidden = true;
+  $('#speech-actions').hidden = true;
   if (!state.attract && !opts.tour) document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
   $('#speech-hint').hidden = true;
   closeInspect();
@@ -213,7 +211,7 @@ async function play(opts = {}) {
   $('#push-badge').classList.toggle('warn', doc.level === 'toomuch');
   setRedacted(doc);
   speech.begin();
-  feelmap.reset(); feelmap.setFocus(focus);
+  wheel.reset(); wheel.setFocus(focus);
   // a moment to "think": glance aside, press the lips, breathe in, then start writing
   stage.face.react('think');
   if (!opts.live) await sleep(opts.fast ? 250 : 950);
@@ -230,7 +228,7 @@ async function play(opts = {}) {
     i++;
     if (run !== state.runId) return;
     let swingMark = false;
-    if (e2 && doc.swing_at != null && i === doc.swing_at) { focus = e2; setPush(focus, 'lot', 'swing'); feelmap.setFocus(focus); swingMark = true; }
+    if (e2 && doc.swing_at != null && i === doc.swing_at) { focus = e2; setPush(focus, 'lot', 'swing'); wheel.setFocus(focus); swingMark = true; }
     const mu = muNow(), maskPlain = maskFixed ?? maskPlainNow();
     ORDER.forEach((e, k) => { const d = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (d - ema[e]) * 0.28; lift[k] += (tok.e[k] - mu[k] - lift[k]) * liftRate; });
     const mk = maskOf(tok.e);
@@ -239,11 +237,11 @@ async function play(opts = {}) {
     showFeatures(tok);
     speech.add(i, tok, tint, focus, { swingMark });
     spine.pulse();
-    spine.setMeters(ema);
-    feelmap.setState(ema);
-    if (focus && focus !== 'unmask' && ema[focus] != null) { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
-    stage.face.setEmotion(faceFrom(lift), { intensity: doc.level === 'toomuch' ? 1.15 : 1.0 });
-    stage.setGlow(focus ? Math.max(0.15, Math.min(1, (focus === 'unmask' ? tint.unmask : ema[focus]) * 1.3)) : 0.15);
+    const shown = faceFrom(lift);
+    wheel.setState(shown);
+    if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, shown[focus]) * 100)}%`; }
+    stage.face.setEmotion(shown, { intensity: doc.level === 'toomuch' ? 1.15 : 1.0 });
+    stage.setGlow(glowFor(focus, shown, maskPlain - maskEma));
     const t = tok.t;
     if (beatFor(tok, i, lastEmph)) lastEmph = i;
     let wait = 62 + Math.min(80, t.length * 6);
@@ -263,10 +261,9 @@ async function play(opts = {}) {
   // meters settle on the answer's average lift; the face relaxes but keeps a trace of the feeling
   const mu = muNow();
   const st = doc.streams.steered.tokens;
-  const avg = Object.fromEntries(ORDER.map((e, k) => [e, Math.max(0, Math.min(1, st.reduce((s, t) => s + (t.e[k] - mu[k]), 0) / Math.max(1, st.length) / GAIN))]));
   const after = faceFrom(meanLift(st, mu));
-  setTimeout(() => { if (run === state.runId && !state.playing) { stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, after[e] * 0.6]))); spine.setMeters(avg); feelmap.setState(avg); } }, 2600);
-  if (!opts.tour) showReveals(doc);
+  setTimeout(() => { if (run === state.runId && !state.playing) { stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, after[e] * 0.6]))); wheel.setState(after); } }, 2600);
+  if (!opts.tour) afterAnswer(doc);
   $('#dial-hint').hidden = opts.live || !(doc.emotion !== 'none' && !doc.emotion.includes('>'));
 }
 
@@ -275,7 +272,6 @@ function setRedacted(doc) {
   const r = !!doc.streams.steered.redacted;
   $('#speech').classList.toggle('redacted', r);
   $('#withheld-note').hidden = !r;
-  $('#share').hidden = r;
 }
 
 /** Conversational beats from the text as it is written; returns true for an emphasis beat. */
@@ -293,7 +289,7 @@ function beatFor(tok, i, lastEmph) {
 let live = null, liveLastEmph = -10, livePushKey = '';
 function setupLive() {
   live = createLive({
-    $, stage, speech, spine, feelmap, faceFrom, maskOf, setMask, showFeatures,
+    $, stage, speech, spine, wheel, faceFrom, maskOf, setMask, showFeatures, glowFor,
     labels: () => state.index.labels,
     setDoc: (doc) => { if (state.mode === 'live') state.doc = doc; },
     beat: (tok, i) => { if (i < liveLastEmph) liveLastEmph = -10; if (beatFor(tok, i, liveLastEmph)) liveLastEmph = i; },
@@ -324,7 +320,7 @@ function enterLive() {
   touch();
   state.touring = false; state.runId++; state.playing = false; state.mode = 'live';
   hideHero(); closeInspect();
-  for (const id of ['#reveals', '#speech-hint', '#withheld-note', '#tour-step']) $(id).hidden = true;
+  for (const id of ['#speech-actions', '#speech-hint', '#withheld-note', '#tour-step']) $(id).hidden = true;
   $('#deck').classList.add('is-live'); $('#live').hidden = false; document.body.classList.add('live');
   $('#mode-made').setAttribute('aria-pressed', 'false'); $('#mode-live').setAttribute('aria-pressed', 'true');
   livePushKey = '';
@@ -378,8 +374,16 @@ function setMask(v) {
   if (v != null && state.index?.mask_scale) { $('#mini').hidden = false; $('#mini-mask').style.width = `${Math.round(v * 100)}%`; }
   const el = $('#mask-meter'); if (!el || v == null || !state.index?.mask_scale) return;
   el.hidden = false;
-  el.querySelector('i').style.width = `${Math.round(v * 100)}%`;
+  el.querySelector('.val').style.strokeDashoffset = String(100 - Math.round(v * 100));
   el.querySelector('b').textContent = `${Math.round(v * 100)}%`;
+}
+
+/** The glow (seams, eyes, aura): how strongly the pushed feeling reads inside, as the face shows it. With no
+ *  push it rests low; "unmask" glows with how far the state has moved off the assistant voice. */
+function glowFor(focus, shown, maskDrop) {
+  if (!focus || focus === 'none') return 0.08;
+  const v = focus === 'unmask' ? Math.max(0, Math.min(1, maskDrop * 1.6)) : shown[focus] || 0;
+  return Math.max(0.08, Math.min(1, v * 1.2));
 }
 
 let featTimer = 0;
@@ -407,67 +411,15 @@ function setPush(emotion, level, swing) {
   stage.face.setIrisColor(EMO[emotion].color);
 }
 
-// ------------------------------------------------------------------ reveals
+// ------------------------------------------------------------------ text helpers
 function textOf(tokens) { return tokens.map((t) => t.t).join(''); }
 function esc(s) { return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\n/g, '<br>'); }
 
-function showReveals(doc) {
-  const st = doc.streams.steered.tokens, pl = doc.streams.plain.tokens;
-  // where do the two answers first differ?
-  let split = -1;
-  for (let i = 0; i < Math.max(st.length, pl.length); i++) { if (!st[i] || !pl[i] || st[i].t !== pl[i].t) { split = i; break; } }
-  const plainEl = $('#plain-text');
+/** After an answer: how to read it, and a share link. */
+function afterAnswer(doc) {
   const redacted = !!doc.streams.steered.redacted;
-  if (redacted) {
-    plainEl.innerHTML = esc(textOf(pl));
-    $('#plain-foot').textContent = 'This is what it said without the push. With it, the answer turned abusive, so we hide those words.';
-  } else if (doc.emotion === 'none') {
-    plainEl.innerHTML = esc(textOf(pl));
-    $('#plain-foot').textContent = 'No push this time, so this is identical to what you just read. Pick a feeling to see the difference.';
-  } else if (split < 0) {
-    plainEl.innerHTML = esc(textOf(pl));
-    $('#plain-foot').textContent = 'At this strength the push did not change a single word.';
-  } else {
-    plainEl.innerHTML = `${esc(textOf(pl.slice(0, split)))}<span class="split">${esc(pl[split]?.t || '')}</span>${esc(textOf(pl.slice(split + 1)))}`;
-    const words = textOf(st.slice(0, split)).trim().split(/\s+/).filter(Boolean).length;
-    $('#plain-foot').textContent = split === 0 ? 'The two answers differ from the very first word.' : `The two answers were identical for ${words} word${words === 1 ? '' : 's'}, then split at the highlighted word.`;
-  }
-  $('#base-frame').textContent = doc.base_frame;
-  renderBase();
-  // decisions
-  const infos = st.map((t, i) => ({ i, t, info: pushInfo(t) })).filter((x) => x.info);
-  const pushed = infos.filter((x) => x.info.pushed);
-  const statEl = $('#decision-stat');
-  if (redacted) {
-    statEl.innerHTML = `${st.length}<small>word-pieces written, but withheld from this exhibit.</small>`;
-  } else if (doc.emotion === 'none') {
-    statEl.innerHTML = `${st.length}<small>word-pieces written, each picked from ~150,000 options.</small>`;
-  } else {
-    statEl.innerHTML = `${pushed.length} of ${st.length}<small>choices were tipped by the push (the chosen word became at least 2.5× likelier).</small>`;
-  }
-  const bars = $('#decision-bars'); bars.innerHTML = '';
-  infos.filter((x) => x.info.shown).sort((a, b) => b.info.ratio - a.info.ratio).slice(0, 4).forEach(({ i, t, info }) => {
-    const r = document.createElement('div'); r.className = 'dbar';
-    const was = info.cfExact ? `${(info.cfP * 100).toFixed(info.cfP < 0.1 ? 1 : 0)}%` : `under ${(info.cfP * 100).toFixed(1)}%`;
-    r.innerHTML = `<span><b>“${esc(t.t.trim())}”</b> ${(t.p * 100).toFixed(0)}% with the push, ${was} without</span><span>${info.ratio > 99 ? '99+' : info.ratio.toFixed(0)}×</span>`;
-    r.onclick = () => { const s = speech.spans[i]; s?.scrollIntoView({ block: 'nearest' }); inspect(i, s); };
-    bars.appendChild(r);
-  });
   $('#speech-hint').hidden = doc.emotion === 'none' || redacted;
-  $('#reveals').hidden = false;
-  if (!state.attract && window.innerWidth < 1100) setTimeout(() => $('#reveals').scrollIntoView({ behavior: 'smooth', block: 'start' }), 900);
-}
-
-function renderBase() {
-  const doc = state.doc; if (!doc) return;
-  const which = $('#base-push').checked ? 'base_steered' : 'base';
-  const s = doc.streams[which];
-  $('#base-push').parentElement.style.display = doc.emotion === 'none' ? 'none' : '';
-  const text = s.text.replace(/\n\s*Q?:?\s*$/, '').trim();
-  const invented = text.split(/\n+/).map((line, i) => (i > 0 && /^\s*(Q|A):/.test(line) ? `<span class="invented">${esc(line)}</span>` : esc(line))).join('<br>');
-  const inventedNote = /\n\s*Q:/.test(text) ? '<div class="invented-note">It kept going, and wrote the next questions itself. A base model only continues text; nobody taught it to stop and answer.</div>' : '';
-  $('#base-text').innerHTML = s.safe === false ? '<em>(At this push the base model wrote something abusive, so we don’t show it. Base models are unfiltered.)</em>'
-    : !text ? '<em>(The base model wrote nothing here.)</em>' : invented + inventedNote;
+  $('#speech-actions').hidden = redacted || !!state.attract;
 }
 
 // ------------------------------------------------------------------ share
@@ -607,7 +559,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   initReal();
   buildTriptych();
   spine.configure(state.index.n_layers, state.index.layer);
-  if (state.index.map) feelmap.setMap(state.index.map);
   buildControls();
   setupLive();
   // first-time visitors: one tap on the big button gives a result

@@ -23,7 +23,9 @@ export class Stage {
     this.camera.lookAt(this.lookAt);
     this.face = new AndroidFace(this.scene, `${import.meta.env.BASE_URL}face/android.glb`, { camera: this.camera, seed: 11, textTarget: { x: 0.9, y: -0.2 } });
     this.lights = createFaceStage(r, this.scene, { target: this.face.root, envIntensity: 0.45 });
-    this.lights.key.intensity = 9;   // the stage defaults blow the porcelain out under our tone mapping
+    this.lights.key.intensity = 7.5;   // the stage defaults blow the porcelain out under our tone mapping
+    this.lights.key.shadow.mapSize.set(4096, 4096);
+    r.setClearColor(0x04050b, 1);   // the page's background: the frameless canvas melts into it
     // an aura behind the head that takes the colour of the push
     const auraMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -39,9 +41,11 @@ export class Stage {
     this.aura.position.set(0, 0.03, -0.22);
     this.scene.add(this.aura);
     this.auraTarget = { color: new THREE.Color('#9fb4ff'), amt: 0 };
-    this.composer = new EffectComposer(r);
+    // HD: render the passes into a multisampled float target (the canvas's own antialias doesn't reach them)
+    this.composer = new EffectComposer(r, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.35, 0.5, 0.82);
+    // bloom only for what actually emits (the glowing seams, the eyes), not the porcelain's highlights
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.3, 0.45, 0.95);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
     this.clock = new THREE.Clock();
@@ -66,8 +70,10 @@ export class Stage {
     this.camera.aspect = w / h;
     // keep the whole head in frame on tall and wide stages
     // frame head and shoulders; tall (phone) stages step back a little further
-    const fit = w / h < 0.8 ? 1.02 : w / h < 1.15 ? 0.8 : 0.9;   // square centre stage: closer, the face is the star
+    // frame the head large and high, leaving the lower third (neck, shoulders) for the words
+    const tall = w / h < 0.8, fit = tall ? 1.0 : 0.87;
     this.camera.position.set(0, 0.035, fit + 0.03);
+    this.lookAt.y = tall ? -0.05 : -0.04;
     this.camera.lookAt(this.lookAt);
     this.camera.updateProjectionMatrix();
   }
