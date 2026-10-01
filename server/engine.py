@@ -38,6 +38,9 @@ class GenConfig:
     rep_penalty: float = 0.0
     rep_window: int = 96
     no_repeat_ngram: int = 0
+    # the counterfactual row starts exactly like the unpushed row, so read the prompt only for rows 0-1 and copy
+    # row 0's cache into row 2 (a third less prefill work: a shorter pause before each new turn)
+    share_prefill: bool = False
 
 
 def chat_prompt_ids(mind: Mind, text) -> list[int]:
@@ -163,9 +166,16 @@ class Engine:
                 if cancel is not None and cancel.is_set():
                     break
                 steer_now = dict(steer_ref)   # the driver may change it at any time; one snapshot per step
-                chat.set_coef(self.coef_tensor(steer_now, [False, True, False]))
-                co = chat.model(c_in, past_key_values=c_past, use_cache=True)
-                c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :], chat.readout()
+                if step == 0 and cfg.share_prefill:
+                    chat.set_coef(self.coef_tensor(steer_now, [False, True]))
+                    co = chat.model(c_in[:2], use_cache=True)
+                    rows = torch.tensor([0, 1, 0], device=chat.device)
+                    co.past_key_values.reorder_cache(rows)
+                    c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :].index_select(0, rows), None   # no readout is emitted for the prompt
+                else:
+                    chat.set_coef(self.coef_tensor(steer_now, [False, True, False]))
+                    co = chat.model(c_in, past_key_values=c_past, use_cache=True)
+                    c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :], chat.readout()
                 if base is not None:
                     base.set_coef(self.coef_tensor(steer_now, [False, True]))
                     bo = base.model(b_in, past_key_values=b_past, use_cache=True)

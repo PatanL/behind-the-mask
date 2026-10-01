@@ -44,7 +44,7 @@ HALF_LIFE = 5.0          # s: a tap's weight halves this fast
 SAT = 3.0                # decayed taps for ~2/3 of full strength
 VISITOR_CAP = 4.0        # one visitor's decayed taps count for at most this much
 TAP_RATE, TAP_BURST = 6.0, 8.0   # per-visitor token bucket (taps / s, burst)
-GAP = 0.8                # s between turns (a breath, not a pause)
+GAP = 0.0                # s between turns (the face takes its breath while the next turn starts)
 SESSION_SECONDS = 30 * 60  # then it starts afresh
 TOPIC_SECONDS = 5 * 60   # each topic runs at least this long (unless someone asks for a new one)
 KEEP_TURNS = 2           # earlier turns kept as context (their unpushed versions, see speak_turn)
@@ -331,7 +331,7 @@ async def wake():
         chat = load_mind("chat", CHAT, True); chat.load(DIRS / "chat_dirs.pt")
         if SAE:
             chat.load_sae(SAE, SAE_LAYER)
-        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.03, rep_penalty=1.2, rep_window=120, no_repeat_ngram=4))
+        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=1.2, rep_window=120, no_repeat_ngram=4, share_prefill=True))
 
     engine = await asyncio.get_running_loop().run_in_executor(None, load)
     print(f"[live] ready: {CHAT}, layer {engine.chat.layer}", flush=True)
