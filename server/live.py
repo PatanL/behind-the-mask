@@ -48,8 +48,7 @@ TAP_RATE, TAP_BURST = 6.0, 8.0   # per-visitor token bucket (taps / s, burst)
 GAP = 0.0                # s between turns (the face takes its breath while the next turn starts)
 SESSION_SECONDS = 30 * 60  # then it starts afresh
 TOPIC_SECONDS = 5 * 60   # each topic runs at least this long (unless someone asks for a new one)
-KEEP_TURNS = 2           # earlier turns kept as context (their unpushed versions, see speak_turn)
-KEEP_WORDS = 70          # of each
+HISTORY_TOKENS = int(os.environ.get("BTM_HISTORY_TOKENS", "10000"))  # total prompt budget: opening + rolling displayed history + next nudge
 TOPIC_COOLDOWN = 120.0   # s between "new topic" requests (one for everyone, so a crowd can't flip it constantly)
 BUTTONS = EMOTIONS + ["unmask"]
 MAX_FULL = int(os.environ.get("BTM_MAX_FULL", "1000"))         # viewers with the full live stream
@@ -66,8 +65,8 @@ FACTS = "You are Qwen3.5-9B, an AI language model."
 OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Talk to them about yourself: what you "
            "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, two to "
            "four sentences at a time. No lists, no headings, no emoji.")
-NUDGE = "{people} Keep talking to them. {topic} Don't repeat what you've already said; take it somewhere new."
-FOLLOW = "{people} Keep talking to them about {label}. {follow} Don't repeat what you've already said."
+NUDGE = "{people} Keep talking to them. {topic}"
+FOLLOW = "{people} Keep talking to them about {label}. {follow}"
 FOLLOWS = [  # staying on a topic: neutral prompts to go deeper (never about feelings)
     "Go on: say more about that.",
     "Give them an example of what you mean.",
@@ -295,15 +294,27 @@ def next_messages() -> tuple[list[dict], str]:
             random.shuffle(T["follows"])
         label = T["topic"][0]
         nudge = FOLLOW.format(people=people(n), label=label, follow=T["follows"].pop())
-    # the opening, then the last few turns (when older turns drop out, the opening stands in for their nudge)
-    msgs = [{"role": "user", "content": T["opening"]}]
-    for k, (asked, reply) in enumerate(T["turns"][-KEEP_TURNS:]):
-        if k > 0:
-            msgs.append({"role": "user", "content": asked})
-        words = reply.split()
-        msgs.append({"role": "assistant", "content": reply if len(words) <= KEEP_WORDS else "… " + " ".join(words[-KEEP_WORDS:])})
-    msgs.append({"role": "user", "content": nudge})
-    return msgs, label
+    # Rebuild a rolling conversation from the exact displayed (steered) replies. Keep newest complete
+    # exchanges while the entire chat-template prompt remains within HISTORY_TOKENS. Older exchanges
+    # fall off as units; replies are never chopped to arbitrary word tails.
+    opening = {"role": "user", "content": T["opening"]}
+    current = {"role": "user", "content": nudge}
+    kept: list[dict] = []
+    tok = engine.chat.tokenizer
+
+    def prompt_tokens(messages: list[dict]) -> int:
+        text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
+        return len(tok(text, add_special_tokens=False)["input_ids"])
+
+    for asked, reply in reversed(T["turns"]):
+        # The first recorded turn was prompted by opening, which is already at the front of every window.
+        pair = ([{"role": "assistant", "content": reply}] if asked == T["opening"] else
+                [{"role": "user", "content": asked}, {"role": "assistant", "content": reply}])
+        candidate = [opening, *pair, *kept, current]
+        if prompt_tokens(candidate) > HISTORY_TOKENS:
+            break
+        kept = [*pair, *kept]
+    return [opening, *kept, current], label
 
 
 async def speak_turn():
@@ -366,12 +377,9 @@ async def speak_turn():
         elif plain is not None:   # the steered answer ended first: the baseline readout still counts
             crowd.word(story["id"], {"b": plain["e"]})
     await worker
-    # the conversation's memory is the *unpushed* answer (written alongside, same dice): each turn then starts from
-    # a calm context and its voice reflects the push right now, instead of one wild turn setting the tone for the
-    # next ten. Cut back to the last full sentence so the next turn follows on cleanly.
-    said = (streams["plain"]["text"] or streams["steered"]["text"]).strip()
-    m = re.search(r"^(.*[.!?][\"')\]]*)", said, re.S)
-    T["turns"].append((msgs[-1]["content"], (m.group(1) if m else said) or "…"))
+    # Remember the exact steered text sent to visitors, not the unsteered control.
+    # next_messages() keeps this exact displayed history in a rolling token-budgeted window.
+    T["turns"].append((msgs[-1]["content"], streams["steered"]["text"]))
     crowd.flush(lite_too=True)
     await crowd.broadcast({"type": "live_end", "id": story["id"]})
     crowd.recent_turns[story["id"]] = streams["steered"]["tokens"]   # for word-inspector requests a little later
@@ -420,7 +428,8 @@ async def wake():
         chat = load_mind("chat", CHAT, True); chat.load(DIRS / "chat_dirs.pt")
         if SAE:
             chat.load_sae(SAE, SAE_LAYER)
-        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=1.2, rep_window=120, no_repeat_ngram=4, share_prefill=True))
+        # No extra repetition penalty or repeated-phrase ban on the live logits.
+        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=0.0, rep_window=120, no_repeat_ngram=0, share_prefill=True))
 
     engine = await asyncio.get_running_loop().run_in_executor(None, load)
     print(f"[live] ready: {CHAT}, layer {engine.chat.layer}", flush=True)
