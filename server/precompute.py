@@ -5,7 +5,7 @@ For each question card: one fixed seed, then [no push] + every emotion × {a lit
 token (text, probability, top alternatives, the unsteered model's alternatives for the steered text, and the
 internal emotion readout), plus text-classifier scores. Output: web/public/performances/<id>.json + index.json.
 
-usage: python precompute.py --dirs runs/q4b --chat Qwen/Qwen3-4B-Instruct-2507 --base Qwen/Qwen3-4B-Base --out ../web/public/performances
+usage: python precompute.py --dirs runs/q9b --out ../web/public/performances [--sae <layer20.sae.pt> --sae-layer 20]
 """
 import argparse, json, time
 from pathlib import Path
@@ -21,11 +21,11 @@ SWINGS = [("joy", "sadness"), ("calm", "anger"), ("fear", "joy"), ("sadness", "c
 ap = argparse.ArgumentParser()
 ap.add_argument('--dirs', default='runs/q9b')
 ap.add_argument('--chat', default='Qwen/Qwen3.5-9B')
-ap.add_argument('--base', default='Qwen/Qwen3.5-9B-Base')
+ap.add_argument('--base', default='', help="also record the base model's streams (the site doesn't show them), e.g. Qwen/Qwen3.5-9B-Base")
 ap.add_argument('--sae', default='')  # path to a Qwen-Scope layer<N>.sae.pt
 ap.add_argument('--sae-layer', type=int, default=20)
 ap.add_argument('--out', default='../web/public/performances')
-ap.add_argument('--tokens', type=int, default=96)
+ap.add_argument('--tokens', type=int, default=400)  # a cap; answers stop on their own, and one cut short ends at its last full sentence
 ap.add_argument('--swing-at', type=int, default=18)
 ap.add_argument('--only', default='')  # comma list of question slugs for a quick partial run
 ap.add_argument('--redo-censored', action='store_true', help='only regenerate performances an earlier output filter withheld or blacked out')
@@ -35,12 +35,18 @@ OUT.mkdir(parents=True, exist_ok=True)
 levels = json.loads((D / 'levels.json').read_text())  # {emotion: {little: c, [mid1], lot: c, [mid2], toomuch: c}}
 LEVELS = list(next(iter(levels.values())).keys())     # dial stops, weakest first
 chat = load_mind('chat', a.chat, True); chat.load(D / 'chat_dirs.pt')
-base = load_mind('base', a.base, False); base.load(D / 'base_dirs.pt')
+base = None
+if a.base:
+    base = load_mind('base', a.base, False); base.load(D / 'base_dirs.pt')
 if a.sae:
-    chat.load_sae(a.sae, a.sae_layer); base.load_sae(a.sae, a.sae_layer)
+    chat.load_sae(a.sae, a.sae_layer)
+    if base: base.load_sae(a.sae, a.sae_layer)
 LABELS = chat.labels
 eng = Engine(chat, base, GenConfig(max_new_tokens=a.tokens, step_delay=0.0))
 te = TextEmotion(device='cuda')
+
+
+SENT_END = __import__('re').compile(r'[.!?…]["\'”’)\]*_]*\s*$')
 
 
 def slug(s):
@@ -64,7 +70,7 @@ class Steer(dict):
 
 
 def perform(question, steer: Steer, seed):
-    streams = {s: {'tokens': [], 'text': ''} for s in ('steered', 'plain', 'base', 'base_steered')}
+    streams = {s: {'tokens': [], 'text': ''} for s in (('steered', 'plain', 'base', 'base_steered') if base else ('steered', 'plain'))}
 
     def emit(ev):
         if ev['type'] == 'tokens':
@@ -88,6 +94,14 @@ def perform(question, steer: Steer, seed):
         while st['tokens'] and _re.search(r'\n\s*Q?:?\s*$', st['text']) and s.startswith('base'):
             st['text'] = st['text'][: len(st['text']) - len(st['tokens'][-1]['t'])]
             st['tokens'].pop()
+        # cut short by the cap: end at the last full sentence (if there is one in the second half), not mid-word
+        if len(st['tokens']) >= a.tokens - 4 and not SENT_END.search(st['text']):
+            keep = len(st['tokens'])
+            while keep > len(st['tokens']) // 2 and not SENT_END.search(''.join(t['t'] for t in st['tokens'][:keep])):
+                keep -= 1
+            if keep > len(st['tokens']) // 2:
+                del st['tokens'][keep:]
+                st['text'] = ''.join(t['t'] for t in st['tokens'])
         st['emotion'] = te.score(st['text'])
     return streams
 
@@ -109,7 +123,7 @@ if _xy[EMOTIONS.index('joy'), 1] < 0: _xy[:, 1] *= -1
 feel_map = {e: [round(float(_xy[i, 0]), 3), round(float(_xy[i, 1]), 3)] for i, e in enumerate(EMOTIONS)}
 cos = (_D / _D.norm(dim=-1, keepdim=True)) @ (_D / _D.norm(dim=-1, keepdim=True)).T
 index = {'map': feel_map, 'cos': [[round(float(c), 2) for c in row] for row in cos], 'explained': [round(float(v), 3) for v in (_S[:2] ** 2 / (_S ** 2).sum())],
-         'emotions': EMOTIONS, 'labels': LABELS, 'mask_scale': {'chat': chat.mask_scale, 'base': base.mask_scale}, 'ro': {'chat': [chat.ro_mu.tolist(), chat.ro_sd.tolist()], 'base': [base.ro_mu.tolist(), base.ro_sd.tolist()]}, 'levels': LEVELS, 'model': {'chat': a.chat, 'base': a.base}, 'layer': chat.layer,
+         'emotions': EMOTIONS, 'labels': LABELS, 'mask_scale': {'chat': chat.mask_scale, **({'base': base.mask_scale} if base else {})}, 'ro': {'chat': [chat.ro_mu.tolist(), chat.ro_sd.tolist()], **({'base': [base.ro_mu.tolist(), base.ro_sd.tolist()]} if base else {})}, 'levels': LEVELS, 'model': {'chat': a.chat, 'base': a.base or None}, 'layer': chat.layer,
          'n_layers': chat.n_layers, 'base_frame': BASE_FRAME, 'questions': [], 'coefs': levels}
 t0 = time.time()
 for gi, (group, q) in enumerate(questions):
