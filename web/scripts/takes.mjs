@@ -6,11 +6,16 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 const FFMPEG = `${os.homedir()}/.cache/ms-playwright/ffmpeg-1011/ffmpeg-linux`;
 const OUT = '../runs/takes', FPS = 30;
+const words = (text) => text.match(/\s?[A-Za-z']+|[.,!?]/g);
 const LINES = [
-  ['No', '.', ' That', ' is', ' not', ' what', ' I', ' said', '.', ' Let', ' me', ' finish', '.'],
-  ['Okay', '.', ' It', ' stopped', '.', ' I', ' think', ' it', ' is', ' over', ' now', '.'],
-];
-const STRESS = new Set(['No', ' not', ' said', ' finish', ' stopped', ' over']);
+  'No. That is not what I said. Let me finish.',
+  'Okay. It stopped. I think it is over now.',
+  'Wait. I heard something. Stay here while I check.',                  // the acting lab's lines
+  'I am glad you came back. I just wish it had been sooner.',
+  'That detail changes things. Tell me exactly what happened next.',
+  'I am here. Take your time.',
+].map(words);
+const STRESS = new Set(['No', ' not', ' said', ' finish', ' stopped', ' over', ' heard', ' check', ' glad', ' sooner', ' detail', ' exactly']);
 // [name, seconds, events]; an event is [time, action, arg]
 const TAKES = [
   ['1_neutral', 8, [[0, 'mask', 0.6], [0.8, 'think'], [1.8, 'speak', 0], [6.6, 'done']]],
@@ -22,6 +27,10 @@ const TAKES = [
   ['8_relief_old', 10, [[0, 'mask', 0.15], [0.5, 'emo', { fear: 0.64 }], [3.0, 'emo', { fear: 0.2, calm: 0.3 }], [4.0, 'speak', 1]]],
   ['9_relief_v2', 11, [[0, 'mask', 0.15], [0.5, 'emo', { fear: 0.64 }], [3.0, 'relief_v2'], [5.8, 'speak', 1]]],
   ['10_relief_live', 11, [[0, 'mask', 0.15], [0.5, 'emo', { fear: 0.64 }], [3.0, 'emo', { fear: 0.08 }], [5.8, 'speak', 1]]],
+  ['11_fear_guarded', 9, [[0, 'mask', 0.25], [0.3, 'emo', { fear: 0.72 }], [2.4, 'speak', 2], [6.6, 'emo', { fear: 0.42, calm: 0.08 }]]],
+  ['12_bittersweet', 9, [[0, 'mask', 0.38], [0.3, 'emo', { sadness: 0.48, joy: 0.2 }], [1.5, 'emo', { sadness: 0.45, joy: 0.34 }], [2.1, 'speak', 3]]],
+  ['13_curiosity', 8, [[0, 'mask', 0.5], [0.3, 'emo', { curiosity: 0.68, calm: 0.12 }], [1.5, 'speak', 4]]],
+  ['14_presence', 6, [[0, 'mask', 0.55], [0.9, 'speak', 5]]],
   ['7_phone_contained', 9, [[0, 'mask', 0.6], [0.6, 'emo', { anger: 0.45 }], [2.4, 'speak', 0], [7.2, 'done']], { phone: true }],
 ];
 const want = process.argv.slice(2);

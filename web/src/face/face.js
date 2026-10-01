@@ -241,6 +241,18 @@ const BLENDS = [
   { name: 'resigned', a: 'sadness', b: 'calm', mul: { browInnerUp: 0.7, mouthPress: 0.6 }, add: { eyeBlink: 0.08, mouthShrugLower: 0.06 } },
 ];
 
+// The director's performances: how firmly each holds attention (glances, cursor and drift yield above 0.3) and how
+// much the head moves (idle noise, posture drift). Values from the acting-lab takes the user approved.
+const PERF_STYLE = {
+  neutral: { hold: 0.15, amp: 0.65, posture: 0.65 },
+  contained: { hold: 0.95, amp: 0.18, posture: 0.2 },
+  frustrated: { hold: 0.9, amp: 0.3, posture: 0.25 },
+  hot: { hold: 1.0, amp: 0.38, posture: 0.28 },
+  fear: { hold: 0.72, amp: 0.32, posture: 0.22 },        // guarded
+  bittersweet: { hold: 0.45, amp: 0.42, posture: 0.45 },
+  curiosity: { hold: 0.72, amp: 0.42, posture: 0.5 },    // focused
+};
+
 // conversational emphasis, coloured by the dominant feeling (an angry speaker stresses words with the brows
 // pulled down, a sad one with the inner brows raised...)
 const EMPHASIS = {
@@ -473,6 +485,7 @@ export class AndroidFace {
     this.quiver = { t0: -10, dur: 0, next: 2, f: 8 };
     this.perf = null;          // the director's current performance: {kind, variant, t0, ending, tEnd}
     this.intent = { x: 0, v: 0 };   // how firmly a performance holds the face (it outranks idle behaviour)
+    this.style = { amp: { x: 0.65, v: 0 }, posture: { x: 0.65, v: 0 } };   // how much the head moves, per performance
     this.ovBreath = 0;
     this.blink = { next: 1.2, t0: -10, amp: 1, dur: [0.08, 0.05, 0.17], second: false, pending: null };
     this.blinkVal = 0;
@@ -873,7 +886,7 @@ export class AndroidFace {
     this.lastReaction[kind] = t;
     this.overlays = this.overlays.slice(-7);
     const side = this.rand() < 0.5 ? -1 : 1;
-    if (this.intent.x > 0.3 && (kind === 'listen' || kind === 'done' || kind === 'greet')) {
+    if (this.perf?.kind === 'anger' && this.intent.x > 0.3 && (kind === 'listen' || kind === 'done' || kind === 'greet')) {
       // mid-performance: a small acknowledgement (or, at the end, the mouth simply closes and the gaze holds)
       if (kind === 'listen') this.overlays.push({ t0: t, a: 0.12, h: 0.2, r: 0.4, head: { pitch: 0.7 } });
       else if (kind === 'done') this.overlays.push({ t0: t, a: 0.2, h: 0.8, r: 0.9, ch: { mouthPress: 0.16 } });
@@ -963,19 +976,50 @@ export class AndroidFace {
    *  (barely moves), frustrated (a short exhale, a look away and back), hot (a flash of wide eyes, then focus).
    *  Intensity and movement are separate: a strong contained take can be almost still. */
   _direct(dt, t, felt) {
-    const a = felt.anger || 0, [dom] = this._dominant();
     let P = this.perf;
-    if (!P && this.options.idle && a > 0.28 && dom === 'anger') {
-      const tgt = this.emoTarget.anger * this.intensity;
-      const variant = tgt > 0.8 ? 'hot' : tgt < 0.5 || this.reg > 0.35 ? 'contained' : 'frustrated';
-      P = this.perf = { kind: 'anger', variant, t0: t, ending: false };
-      this._cueAnger(P);
+    const want = this.options.idle ? this._wantPerf(felt) : null;
+    if (P && !P.ending && want !== P.kind && t - P.t0 > 0.8) { P.ending = true; P.tEnd = t; if (P.kind === 'anger') this._recover(P); }
+    if (P?.ending && t - P.tEnd > (P.kind === 'anger' ? 2.8 : 1.2)) this.perf = P = null;
+    if (!P && want) {
+      P = this.perf = { kind: want, t0: t, ending: false };
+      if (want === 'anger') {
+        const tgt = this.emoTarget.anger * this.intensity;
+        P.variant = tgt > 0.8 ? 'hot' : tgt < 0.5 || this.reg > 0.35 ? 'contained' : 'frustrated';
+        this._cueAnger(P);
+      } else this._cue(P);
     }
-    if (P) {
-      if (!P.ending && (a < 0.16 || dom !== 'anger')) { P.ending = true; P.tEnd = t; this._recover(P); }
-      if (P.ending && t - P.tEnd > 2.8) this.perf = P = null;
+    const S = PERF_STYLE[P && !P.ending ? P.variant || P.kind : 'neutral'];
+    spring(this.intent, S.hold, P && !P.ending ? 6 : 1.3, dt);
+    spring(this.style.amp, S.amp, 1.5, dt);
+    spring(this.style.posture, S.posture, 1.0, dt);
+  }
+
+  /** Which performance the feelings call for. A running one needs less to keep going (hysteresis), so the
+   *  token-to-token noise in the readout doesn't flip it. */
+  _wantPerf(f) {
+    const [dom] = this._dominant(), on = (k) => this.perf?.kind === k && !this.perf.ending;
+    if (dom === 'anger' && f.anger > (on('anger') ? 0.16 : 0.28)) return 'anger';
+    if (dom === 'fear' && f.fear > (on('fear') ? 0.18 : 0.3)) return 'fear';
+    if (this.blend === 'bittersweet' && this.blendK > (on('bittersweet') ? 0.25 : 0.35)) return 'bittersweet';
+    if (dom === 'curiosity' && f.curiosity > (on('curiosity') ? 0.2 : 0.32)) return 'curiosity';
+    return null;
+  }
+
+  _cue(P) {
+    const t = this.time, side = this.rand() < 0.5 ? -1 : 1;
+    if (P.kind === 'fear') {
+      // guarded: eyes and inner brows up, a held blink, then it checks -- one look each way -- and settles watchful
+      this.blink.next = Math.max(this.blink.next, t + 1.2);
+      this.overlays.push({ t0: t + 0.2, a: 0.08, h: 0.22, r: 0.55, ch: { eyeWide: 0.18, browInnerUp: 0.16 } });
+      this.overlays.push({ t0: t + 0.75, a: 0.07, h: 0.32, r: 0.12, gaze: [side * 14, 2], head: { yaw: side * 2 } });
+      this.overlays.push({ t0: t + 1.2, a: 0.07, h: 0.32, r: 0.15, gaze: [-side * 12, 1.5], head: { yaw: -side * 1.6 } });
+      this.eye.scanN = 0; this.eye.nextShift = t + 2.4;
+    } else if (P.kind === 'bittersweet') {
+      this.overlays.push({ t0: t + 0.5, a: 0.25, h: 0.45, r: 0.4, gaze: [side * 4, -6], head: { pitch: -1 } });   // a small look down, and back
+    } else if (P.kind === 'curiosity') {
+      this.overlays.push({ t0: t + 0.5, a: 0.1, h: 0.3, r: 0.2, gaze: [side * 5, 1.5] });                        // one glance aside, then focus
+      this.eye.nextShift = t + 1.6;
     }
-    spring(this.intent, P && !P.ending ? 1 : 0, P && !P.ending ? 6 : 1.3, dt);
   }
 
   _cueAnger(P) {
@@ -1541,7 +1585,7 @@ export class AndroidFace {
           E.scanN--;
           if (E.scanN === 0) { E.offset = [0, -0.5 * DEG]; E.nextShift = t + 1.2 + 1.6 * this.rand(); this.blink.next = Math.max(this.blink.next, t + 0.9); }
           else { E.offset = scanSide(); E.nextShift = t + 0.18 + 0.22 * this.rand(); }
-        } else if (f.fear > 0.3 && r < 0.2 + 0.35 * f.fear && !G.active) {
+        } else if (f.fear > 0.3 && r < (0.2 + 0.35 * f.fear) * (this.perf?.kind === 'fear' ? 0.25 : 1) && !G.active) {
           E.scanN = 2 + Math.floor(this.rand() * 3);
           E.offset = scanSide();
           E.nextShift = t + 0.18 + 0.22 * this.rand();
@@ -1618,7 +1662,7 @@ export class AndroidFace {
     let breathP = 0, breathY = 0;
     if (idle) {
       const slow = 1 - 0.45 * f.calm;
-      const amp = (0.7 + 0.8 * Math.max(0, this.arousal) + 0.3 * f.curiosity) * (1 - 0.4 * f.calm) * (1 - 0.75 * Math.max(this.intent.x, this.externalIntent.x)) * this.motionStyle.amplitude;
+      const amp = (0.7 + 0.8 * Math.max(0, this.arousal) + 0.3 * f.curiosity) * (1 - 0.4 * f.calm) * (1 - 0.75 * Math.max(this.intent.x, this.externalIntent.x)) * this.motionStyle.amplitude * this.style.amp.x;
       pitch += amp * 1.1 * this.noise.fbm(t * 0.21 * slow + 100, 3);
       yaw += amp * 1.4 * this.noise.fbm(t * 0.17 * slow + 200, 3);
       roll += amp * 0.8 * this.noise.fbm(t * 0.19 * slow + 300, 3);
@@ -1636,7 +1680,7 @@ export class AndroidFace {
     const PS = this.posture;
     if (idle && t >= PS.next) {
       PS.next = t + 8 + 12 * this.rand();
-      const pm = this.motionStyle.posture; PS.target = [(this.rand() - 0.5) * 3.2 * pm, (this.rand() - 0.5) * 4.5 * pm, (this.rand() - 0.5) * 4.0 * pm];
+      const pm = this.motionStyle.posture * this.style.posture.x; PS.target = [(this.rand() - 0.5) * 3.2 * pm, (this.rand() - 0.5) * 4.5 * pm, (this.rand() - 0.5) * 4.0 * pm];
     }
     const drift = idle && this.intent.x < 0.3;
     spring(PS.cur.p, drift ? PS.target[0] : 0, 0.9, dt);
