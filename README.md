@@ -11,9 +11,10 @@ live, and the face mouths the words as they appear. Beside it:
 - **How it feels inside:** six petals that grow with the feeling read from its hidden state.
 - **Its decisions:** tap any word to see what the AI was choosing between, with and without the push, and how
   much the push tilted the odds.
-- **Live, with everyone:** when the live server runs, everyone on the page steers *one* AI together. It
-  writes a short story while visitors tap (or hold) feeling buttons, and each word is written with the mix of
-  everyone's recent taps. When the story ends, you see the same story written with nobody pushing.
+- **Live, with everyone** (the page opens on it when the live server runs): the AI talks about itself without
+  stopping (what it is, forgetting, being switched off, the people watching), and everyone on the page steers
+  how it feels together. Each word is written with the mix of everyone's recent taps. The prompts never mention
+  feelings: unpushed, it gives its usual assistant answers.
 
 > The face and the glowing words are driven by a **measurement** of patterns inside the model that are
 > associated with emotional language. That is not evidence the model feels anything. The exhibit says so on
@@ -55,8 +56,10 @@ live, and the face mouths the words as they appear. Beside it:
    readout through a decoder fitted on the pushes. Its acting draws on the psychology of facial behaviour:
    blended feelings, a polite "mask" that hides negative feelings while the Mask meter is high, brief leaks of
    the real feeling, and breathing and eye behaviour for each feeling. Details: [docs/research.md](docs/research.md).
-9. **Live crowd steering** (`server/live.py`). Visitors only press buttons. Taps fade with a 5-second half-life,
-   and no visitor counts for more than a capped share of the push.
+9. **Live crowd steering** (`server/live.py`). One continuous monologue about itself: after every few sentences
+   the server nudges it onto the next topic, keeping its last turns as context. Visitors only press buttons.
+   Taps fade with a 5-second half-life, no visitor counts for more than a capped share of the push, and the live
+   generation penalises repeats (a long monologue otherwise falls into loops under a strong push).
 
 The full list of papers and techniques, with what we use from each, is in **[docs/research.md](docs/research.md)**.
 

@@ -1,36 +1,49 @@
-// The answer, written word-piece by word-piece. Colour = how strongly the push's emotion shows up inside the
-// model at that point (measured, relative to the unpushed answer). Underline = the push changed this choice.
+// The answer, written word-piece by word-piece, as subtitles: a fixed box of a few lines whose newest line is
+// always the bottom one; older lines rise and fade out of the top. Colour = how strongly the push's emotion shows
+// up inside the model at that point (measured, relative to the unpushed answer). Underline = the push changed
+// this choice.
 import { EMO, ORDER, mix } from './palette.js';
 import { pushInfo } from './data.js';
 
 export class Speech {
   constructor(el, { onPick } = {}) {
     this.el = el; this.onPick = onPick;
+    this.text = document.createElement('div');   // the text block, bottom-anchored inside the fixed box
+    this.text.className = 'speech-text';
+    el.appendChild(this.text);
+    this.spans = [];
     el.addEventListener('click', (ev) => {
       const s = ev.target.closest('.tok');
       if (!s) return;
-      this.el.querySelectorAll('.tok.sel').forEach((x) => x.classList.remove('sel'));
+      this.text.querySelectorAll('.tok.sel').forEach((x) => x.classList.remove('sel'));
       s.classList.add('sel');
       onPick?.(Number(s.dataset.i), s);
     });
   }
 
-  // clear(): an empty page for a static render (shown in full); begin(): a live subtitle window; end(): full text
-  clear() { this.el.innerHTML = ''; this.caret = null; this.spans = []; this.el.classList.add('full'); this.el.classList.remove('scrolled'); this.el.scrollTop = 0; }
+  clear() { this.text.innerHTML = ''; this.caret = null; this.spans = []; }
 
   begin() {
     this.clear();
-    this.el.classList.remove('full');
     this.caret = document.createElement('span');
     this.caret.className = 'caret';
-    this.el.appendChild(this.caret);
+    this.text.appendChild(this.caret);
+  }
+
+  /** Live: keep talking in the same box (a new turn starts on a new line); drop text long scrolled away. */
+  continueLine() {
+    if (!this.caret) { this.caret = document.createElement('span'); this.caret.className = 'caret'; this.text.appendChild(this.caret); }
+    if (this.text.childNodes.length > 1) this.text.insertBefore(document.createElement('br'), this.caret);
+    while (this.text.childNodes.length > 600) this.text.firstChild.remove();
+    this.text.querySelectorAll('.tok[data-i]').forEach((s) => { delete s.dataset.i; s.classList.add('old'); });
+    this.spans = [];
   }
 
   /** tok: steered token; delta: {emotion: value 0..1} measured lift; focus: the push emotion (or null) */
   add(i, tok, delta, focus, { swingMark = false, instant = false, changed = false } = {}) {
     const parts = tok.t.split('\n');
     parts.forEach((part, k) => {
-      if (k > 0) this.el.insertBefore(document.createElement('br'), this.caret);
+      if (k > 0) this.text.insertBefore(document.createElement('br'), this.caret);
       if (!part) return;
       const s = document.createElement('span');
       s.className = instant ? (changed ? 'tok changed' : 'tok') : 'tok new';
@@ -46,15 +59,12 @@ export class Speech {
       const pi = pushInfo(tok);
       if (pi?.shown) { s.classList.add('pushed'); s.style.setProperty('--c', focus ? EMO[focus]?.color : '#9fb4ff'); }
       if (swingMark && k === 0) s.classList.add('swing-mark');
-      this.el.insertBefore(s, this.caret);
+      this.text.insertBefore(s, this.caret);
       this.spans[i] = s;
       if (!instant) setTimeout(() => s.classList.remove('new'), 520);
     });
-    if (instant && this.el.classList.contains('full')) return;
-    // keep the newest line in view but let early lines stay visible as long as possible
-    const over = this.el.scrollHeight - this.el.clientHeight;
-    if (over > 0) { if (instant) this.el.scrollTop = over; else this.el.scrollTo({ top: over, behavior: 'smooth' }); this.el.classList.add('scrolled'); }
   }
 
-  end() { this.caret?.remove(); this.caret = null; this.el.classList.add('full'); this.el.scrollTop = 0; }
+  /** The answer is done: the last lines simply stay. */
+  end() { this.caret?.remove(); this.caret = null; }
 }

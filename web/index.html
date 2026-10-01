@@ -12,8 +12,8 @@
     <header class="top">
       <div class="brand"><span class="brand-mark"></span>Behind the Mask</div>
       <nav class="top-nav">
-        <button class="link" id="open-how">How does this work?</button>
-        <a class="link" href="https://github.com/" id="repo-link" target="_blank" rel="noopener">Research &amp; code</a>
+        <button class="link" id="open-how"><span class="long">How does this work?</span><span class="short">How it works</span></button>
+        <a class="link" href="https://github.com/" id="repo-link" target="_blank" rel="noopener"><span class="long">Research &amp; code</span><span class="short">Code</span></a>
       </nav>
     </header>
 
@@ -38,6 +38,10 @@
         <div class="stage-loading">Waking the android…</div>
         <div class="push-badge" id="push-badge" hidden></div>
         <div class="mini" id="mini" hidden><span class="mini-l">Mask</span><span class="mini-bar"><i id="mini-mask"></i></span><span class="mini-l" id="mini-emo-l">Joy</span><span class="mini-bar"><i id="mini-emo"></i></span></div>
+        <div class="subs">
+          <div class="speech-label" id="speech-label"></div>
+          <div class="speech" id="speech" aria-live="polite"></div>
+        </div>
       </section>
 
       <aside class="inside inside-r" aria-label="How it feels inside">
@@ -49,97 +53,43 @@
         <div class="inside-note">Read from patterns in its hidden state: a measurement of language patterns, not feelings.</div>
       </aside>
 
-      <section class="speech-wrap">
-        <div class="hero" id="hero">
-          <div class="hero-kicker">An experiment you can play with</div>
-          <h1 class="hero-h">What happens if you reach inside an AI and turn up a feeling?</h1>
-          <p class="hero-p">This AI has hidden directions for joy, fear, anger and more, plus one for its polite assistant persona. Push on one and watch its words, and its face, change.</p>
-          <div class="hero-cta"><button class="pill big" id="tour">▶ Show me (60 seconds)</button><button class="link" id="skip-tour">I'll explore myself</button></div>
-          <button class="live-cta" id="hero-live" hidden><i class="live-dot"></i><span><b>Live now:</b> steer one AI together with everyone on this page</span><span class="live-n" id="hero-live-n"></span></button>
-        </div>
-        <div class="tour-step" id="tour-step" hidden></div>
-        <div class="stage-caption" id="caption" aria-live="polite"></div>
-        <div class="speech-label" id="speech-label" hidden>It will answer here.</div>
-        <div class="speech" id="speech" aria-live="polite"></div>
-        <div class="withheld-note" id="withheld-note" hidden>At this strength the pushed AI turned abusive, so we black out its words. The colour and the face still show what was measured inside it while it wrote them.</div>
-        <div class="live-panel" id="live" hidden>
-          <div class="live-h">Everyone on this page is steering <b>the same AI</b>, right now. Tap or hold a feeling to push its story that way. Taps fade after a few seconds.</div>
-          <div class="live-buttons" id="live-buttons"></div>
-          <div class="crowd"><div class="crowd-bar" id="crowd-bar"></div><div class="crowd-meta"><span id="crowd-power">Connecting…</span><span id="crowd-viewers"></span></div></div>
-          <div class="live-status" id="live-status"></div>
-          <div class="live-plain" id="live-plain" hidden>
-            <div class="live-plain-h">The same story, with nobody pushing</div>
-            <p class="card-sub">Same AI, same random dice, written word for word alongside yours. Every difference came from your taps.</p>
-            <div class="card-text" id="live-plain-text"></div>
-          </div>
-          <button class="link" id="live-leave">← Back to the ready-made answers</button>
-        </div>
-        <div class="speech-actions" id="speech-actions" hidden><button class="link" id="share">Share this answer ↗</button></div>
-        <div class="speech-hint" id="speech-hint" hidden>Colour shows how strongly the feeling registers inside it. <u>Underlined</u> words are where the push flipped its choice. Tap any word to see what it was deciding between.</div>
-      </section>
     </main>
 
 
-    <section class="deck" id="deck">
-      <div class="mode" id="mode" hidden>
-        <button class="mode-b" id="mode-made" aria-pressed="true">Ready-made answers</button>
-        <button class="mode-b" id="mode-live" aria-pressed="false"><i class="live-dot"></i> Live, with everyone <span class="live-n" id="mode-live-n"></span></button>
+    <section class="controls" id="deck">
+      <div class="mode" id="mode">
+        <button class="mode-b" id="mode-live" aria-pressed="true"><i class="live-dot"></i> <span class="long">Live, with everyone</span><span class="short">Live</span> <span class="live-n" id="mode-live-n"></span></button>
+        <button class="mode-b" id="mode-made" aria-pressed="false"><span class="long">Ready-made answers</span><span class="short">Ready-made</span></button>
       </div>
-      <div class="step step-q">
-        <div class="step-title"><span class="n">1</span> Pick something to ask</div>
-        <div class="chips" id="questions"></div>
-      </div>
-      <div class="step step-f">
-        <div class="step-title"><span class="n">2</span> Push it toward a feeling</div>
-        <div class="orbs" id="feelings"></div>
-        <div class="dial" id="dial">
-          <div class="dial-top"><span>How hard to push</span><b id="dial-val">A lot</b></div>
-          <input type="range" id="dial-in" min="1" max="5" step="1" value="3" aria-label="How hard to push" />
-          <div class="dial-ticks"><span>A little</span><span>A lot</span><span>Way too much</span></div>
-          <div class="dial-hint" id="dial-hint" hidden>Drag to watch the same answer change.</div>
+      <div class="ctl ctl-live" id="live" hidden>
+        <div class="live-buttons" id="live-buttons"></div>
+        <div class="ctl-foot">
+          <div class="crowd"><div class="crowd-bar" id="crowd-bar"></div><div class="crowd-meta"><span id="crowd-power">Connecting…</span><span id="crowd-viewers"></span></div></div>
+          <button class="link topic-b" id="new-topic">New topic ↻</button>
         </div>
+        <div class="ctl-status" id="live-status"></div>
       </div>
-      <div class="step step-go">
-        <button class="go" id="go" disabled><span>Let it speak</span></button>
-        <div class="go-note" id="go-note">Choose a question first.</div>
+      <div class="ctl ctl-made" id="made" hidden>
+        <div class="made-bar">
+          <label class="q-pick"><span>Ask</span><select id="q-select" aria-label="Question"></select></label>
+          <div class="orbs" id="feelings"></div>
+          <div class="dial" id="dial">
+            <div class="dial-top"><span>How hard</span><b id="dial-val">A lot</b></div>
+            <input type="range" id="dial-in" min="1" max="5" step="1" value="3" aria-label="How hard to push" />
+          </div>
+          <button class="go" id="go"><span>Let it speak</span></button>
+        </div>
+        <div class="ctl-status"><span id="go-note"></span><button class="link" id="share" hidden>Share this answer ↗</button></div>
       </div>
-    </section>
-
-
-
-    <section class="triptych" id="triptych" hidden>
-      <h2>Same question. Same AI. Three different inner states.</h2>
-      <p>Nothing about the model changed between these three answers except one direction we added inside it.</p>
-      <div class="tri-q" id="tri-q"></div>
-      <div class="tri-cols" id="tri-cols"></div>
-    </section>
-
-    <section class="real" id="real" hidden>
-      <h2>Is the reading real?</h2>
-      <p>No steering here. We just change one thing in a sentence and watch the model's own feeling signals. If the directions mean something, the signal should follow the story.</p>
-      <div class="chips real-pick"></div>
-      <div class="real-sentence"></div>
-      <input type="range" min="0" max="5" value="0" step="1" aria-label="Change the sentence" />
-      <div class="real-chart"></div>
-      <div class="real-note"></div>
     </section>
 
     <footer class="foot" id="research">
-      <div class="foot-h">The research behind this</div>
-      <ul class="refs">
-        <li><a href="https://transformer-circuits.pub/2026/emotions/index.html" target="_blank" rel="noopener">Emotion concepts and their function in a large language model</a> <span>Anthropic, 2026</span></li>
-        <li><a href="https://arxiv.org/abs/2601.10387" target="_blank" rel="noopener">The Assistant Axis</a> <span>Lu et al., 2026</span></li>
-        <li><a href="https://arxiv.org/abs/2605.11887" target="_blank" rel="noopener">Qwen-Scope: sparse features as development tools</a> <span>Deng et al., 2026</span></li>
-        <li><a href="https://arxiv.org/abs/2604.04064" target="_blank" rel="noopener">Extracting and Steering Emotion Representations in Small LMs</a> <span>Jeong, 2026</span></li>
-        <li><a href="https://arxiv.org/abs/2510.22042" target="_blank" rel="noopener">Emotions Where Art Thou (the emotional latent space of LLMs)</a> <span>Reichman et al., ICLR 2026</span></li>
-        <li><a href="https://arxiv.org/abs/2308.10248" target="_blank" rel="noopener">Steering Language Models With Activation Engineering</a> <span>Turner et al., 2023</span></li>
-        <li><a href="https://arxiv.org/abs/2312.06681" target="_blank" rel="noopener">Steering Llama 2 via Contrastive Activation Addition</a> <span>Panickssery et al., 2023</span></li>
-        <li><a href="https://arxiv.org/abs/2507.21509" target="_blank" rel="noopener">Persona Vectors</a> <span>Chen et al., 2025</span></li>
-        <li><a href="https://arxiv.org/abs/2410.13928" target="_blank" rel="noopener">Automatically Interpreting Millions of Features in LLMs</a> <span>Paulo et al., 2024</span></li>
-        <li><a href="https://arxiv.org/abs/2203.02155" target="_blank" rel="noopener">Training language models to follow instructions with human feedback</a> <span>Ouyang et al., 2022</span></li>
-        <li><a href="https://arxiv.org/abs/2409.17027" target="_blank" rel="noopener">Counterfactual Token Generation in LLMs</a> <span>Chatzi et al., 2024</span></li>
-      </ul>
-      <div class="foot-note">Models: Qwen3.5-9B and Qwen3.5-9B-Base (Apache-2.0), with Qwen-Scope sparse autoencoders. Face: ICT-FaceKit (MIT). The face and colours visualise measured activation patterns, not feelings.</div>
+      Built on <a href="https://transformer-circuits.pub/2026/emotions/index.html" target="_blank" rel="noopener">emotion vectors</a> (Anthropic, 2026),
+      <a href="https://arxiv.org/abs/2601.10387" target="_blank" rel="noopener">the assistant axis</a> (Lu et al., 2026),
+      <a href="https://arxiv.org/abs/2605.11887" target="_blank" rel="noopener">Qwen-Scope</a> (Deng et al., 2026) and
+      <a href="https://arxiv.org/abs/2312.06681" target="_blank" rel="noopener">activation steering</a>.
+      Qwen3.5-9B, ICT-FaceKit. The face and colours show measured activation patterns, not feelings.
+      <a href="https://github.com/" id="repo-foot" target="_blank" rel="noopener">All papers and code ↗</a>
     </footer>
 
     <div class="inspect" id="inspect" hidden role="dialog" aria-label="Word choice">

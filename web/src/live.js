@@ -1,5 +1,6 @@
-// Live: everyone on the page steers one AI together (server/live.py). Visitors only press feeling buttons;
-// the server mixes everyone's recent taps into the push and streams the story, word by word, to everyone.
+// Live: the AI talks about itself, without stopping, and everyone on the page steers how it feels together
+// (server/live.py). Visitors only press feeling buttons (and "New topic"); the server mixes everyone's recent taps
+// into the push and streams the monologue, word by word, to everyone.
 import { EMO, ORDER } from './palette.js';
 
 const BUTTONS = [...ORDER, 'unmask'];
@@ -25,7 +26,7 @@ export async function liveStatus() {
  */
 export function createLive(ctx) {
   const { $, stage, speech } = ctx;
-  let ws = null, on = false, story = null, lastListen = 0, retry = 0, nextTimer = 0;
+  let ws = null, on = false, story = null, lastListen = 0, retry = 0, shownTalk = null, topic = '', viewers = 0;
 
   // ---- buttons (press and hold to keep pushing)
   const host = $('#live-buttons');
@@ -63,23 +64,22 @@ export function createLive(ctx) {
   const labels = () => ctx.labels();
   let lift, maskEma, maskPlain, i;
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
+  // one turn of the monologue; a turn that continues the talk on screen carries on in the same subtitle box
   function begin(msg) {
-    clearInterval(nextTimer);
-    story = { id: msg.id, prompt: msg.question, steered: [], plain: [], ended: false };
+    const cont = !!msg.continues && shownTalk === msg.talk;
+    shownTalk = msg.talk;
+    story = { id: msg.id, topic: msg.topic, steered: [], plain: [], ended: false };
     lift = ORDER.map(() => 0); maskEma = null; maskPlain = null; i = -1;
     ORDER.forEach((e) => { ema[e] = 0; });
-    speech.begin();
+    if (cont) speech.continueLine(); else speech.begin();
     $('#speech').classList.remove('redacted', 'overdrive');
-    $('#withheld-note').hidden = true;
-    $('#live-plain').hidden = true;
-    $('#speech-label').hidden = false;
-    $('#speech-label').textContent = `Live · “${msg.question.replace(/^Tell me a very short story \(under 130 words\) about /, 'A story about ').replace(/\.$/, '')}”`;
-    status('Writing now. Tap a feeling to push the story toward it.');
-    stage.face.react('think');
+    topic = msg.topic || ''; label();
+    if (!cont) stage.face.react('think');
     const id = msg.id;
-    setTimeout(() => { if (on && story?.id === id && !story.ended) stage.face.setActivity({ writing: true }); }, 700);
+    setTimeout(() => { if (on && story?.id === id && !story.ended) stage.face.setActivity({ writing: true }); }, cont ? 150 : 700);
     syncDoc();
   }
+  function label() { $('#speech-label').textContent = `Live · talking about ${topic}${viewers > 1 ? ` · ${viewers} people here` : ''}`; }
   const meanE = (toks, k) => (toks.length ? toks.reduce((s, t) => s + t.e[k], 0) / toks.length : 0);
   function pushAt(tok) {
     // which button dominated the push when this word was written (weights relative to each button's full strength)
@@ -123,19 +123,12 @@ export function createLive(ctx) {
     if (instant) stage.face.setEmotion(ctx.faceFrom(lift));
     syncDoc();
   }
+  // between turns: a breath, not a sign-off (the next turn follows within a second)
   function end(msg) {
     if (!story || msg.id !== story.id) return;
     story.ended = true;
     speech.end();
     stage.face.setActivity({ writing: false });
-    stage.face.react('done');
-    const plain = msg.doc?.streams?.plain;
-    if (plain?.text && plain.safe !== false) {
-      $('#live-plain-text').textContent = plain.text.trim();
-      $('#live-plain').hidden = false;
-    }
-    if (msg.doc) { story.steered = msg.doc.streams.steered.tokens; story.plain = plain?.tokens || story.plain; syncDoc(); }
-    countdown(7);
   }
   // the story stopped without an end (server error, lost connection): the face stops writing and settles
   function stopFace() {
@@ -144,15 +137,9 @@ export function createLive(ctx) {
     stage.face.clearReactions();
     stage.face.setEmotion({});
   }
-  function countdown(s) {
-    clearInterval(nextTimer);
-    let left = s;
-    const tick = () => { status(left > 0 ? `Next story in ${left} s. Get ready to push.` : 'Starting…'); left--; if (left < 0) clearInterval(nextTimer); };
-    tick(); nextTimer = setInterval(tick, 1000);
-  }
   function syncDoc() {
     if (!story) return;
-    ctx.setDoc({ id: story.id, question: story.prompt, emotion: 'crowd', level: 'live', streams: { steered: { tokens: story.steered }, plain: { tokens: story.plain } } });
+    ctx.setDoc({ id: story.id, question: story.topic, emotion: 'crowd', level: 'live', streams: { steered: { tokens: story.steered }, plain: { tokens: story.plain } } });
   }
   function status(t) { $('#live-status').textContent = t; }
 
@@ -161,17 +148,20 @@ export function createLive(ctx) {
     const p = msg.power || 0;
     bar.querySelectorAll('i').forEach((el) => { el.style.width = `${(msg.mix?.[el.dataset.b] || 0) * p * 100}%`; });
     const lead = BUTTONS.reduce((a, b) => ((msg.mix?.[b] || 0) > (msg.mix?.[a] || 0) ? b : a), BUTTONS[0]);
-    $('#crowd-power').textContent = p < 0.04 ? 'Nobody is pushing: it writes as trained'
-      : `${p < 0.35 ? 'A gentle' : p < 0.7 ? 'A strong' : 'A full'} push, mostly ${EMO[lead].label.toLowerCase()}`;
-    $('#crowd-viewers').textContent = msg.viewers > 1 ? `${msg.viewers} people steering` : 'Just you right now';
+    $('#crowd-power').textContent = p < 0.04 ? 'Nobody is pushing: it talks as trained'
+      : `${p < 0.35 ? 'A gentle' : p < 0.7 ? 'A strong' : 'A full'} push, mostly ${lead === 'unmask' ? 'off the mask' : EMO[lead].label.toLowerCase()}`;
+    $('#crowd-viewers').textContent = msg.viewers > 1 ? `${msg.viewers} steering` : 'Just you';
+    if (msg.viewers !== viewers) { viewers = msg.viewers; if (story) label(); }
+    $('#new-topic').disabled = !msg.topic_ready || msg.changing;
     ctx.onPush?.(p < 0.04 ? null : lead, p);
     // other people's taps light the buttons
     for (const [b, n] of Object.entries(msg.taps || {})) {
       const el = host.querySelector(`[data-b="${b}"]`);
       if (el) el.style.setProperty('--heat', Math.min(1, n / 6).toFixed(2));
     }
-    if (!msg.ready) status('The AI is waking up (loading the model)…');
-    else if (!msg.story && !story) status(msg.next_in != null ? `Next story in ${Math.ceil(msg.next_in)} s. Get ready to push.` : 'Starting…');
+    status(!msg.ready ? 'The AI is waking up (loading the model)…'
+      : msg.changing ? 'Changing the subject after this sentence…'
+      : 'Tap or hold a feeling to push what it says. Taps fade in seconds.');
   }
 
   function connect() {
@@ -183,7 +173,7 @@ export function createLive(ctx) {
       else if (msg.type === 'live_begin') begin(msg);
       else if (msg.type === 'live_tokens') { if (msg.catchup && (!story || story.id !== msg.id)) return; tokens(msg); }
       else if (msg.type === 'live_end') end(msg);
-      else if (msg.type === 'live_error') { if (story) { stopFace(); story = null; } status('Something went wrong with that story. A new one starts in a moment.'); }
+      else if (msg.type === 'live_error') { if (story) { stopFace(); story = null; } }
     };
     ws.onclose = () => {
       if (!on) return;
@@ -194,10 +184,11 @@ export function createLive(ctx) {
   }
   return {
     get on() { return on; },
+    newTopic() { if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'topic' })); $('#new-topic').disabled = true; },
     enter() {
       if (on) return;
       on = true;
-      story = null;
+      story = null; shownTalk = null;
       speech.clear();
       status('Connecting…');
       connect();
@@ -205,7 +196,6 @@ export function createLive(ctx) {
     leave() {
       if (!on) return;
       on = false;
-      clearInterval(nextTimer);
       try { ws?.close(); } catch { /* closed */ }
       ws = null; story = null;
       stopFace();

@@ -33,10 +33,17 @@ class GenConfig:
     top_p: float = 0.92
     top_k_alts: int = 5
     step_delay: float = 0.05   # seconds; keeps the three streams at reading pace
+    # repetition control (off by default, so the pre-computed performances are unchanged): a presence penalty on
+    # tokens used in the last `rep_window` tokens, and a ban on repeating any `no_repeat_ngram`-token phrase
+    rep_penalty: float = 0.0
+    rep_window: int = 96
+    no_repeat_ngram: int = 0
 
 
-def chat_prompt_ids(mind: Mind, text: str) -> list[int]:
-    msgs = ([{"role": "system", "content": CHAT_SYSTEM}] if CHAT_SYSTEM else []) + [{"role": "user", "content": text}]
+def chat_prompt_ids(mind: Mind, text) -> list[int]:
+    """text: one user message, or a whole conversation as a list of {role, content} messages."""
+    turns = [{"role": "user", "content": text}] if isinstance(text, str) else list(text)
+    msgs = ([{"role": "system", "content": CHAT_SYSTEM}] if CHAT_SYSTEM else []) + turns
     s = mind.tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False)
     return mind.tokenizer(s, add_special_tokens=False)["input_ids"]
 
@@ -86,6 +93,21 @@ def _sample(logits: torch.Tensor, noise: torch.Tensor, temp: float, top_p: float
     return torch.argmax(filt + noise, dim=-1)
 
 
+def _discourage_repeats(logits: torch.Tensor, row: int, ids: list[int], cfg: "GenConfig"):
+    """In place: lower the logits of recently used tokens and ban tokens that would repeat an n-gram."""
+    if cfg.rep_penalty > 0 and ids:
+        recent = torch.tensor(sorted(set(ids[-cfg.rep_window:])), device=logits.device)
+        logits[row, recent] -= cfg.rep_penalty
+    n = cfg.no_repeat_ngram
+    if n > 1 and len(ids) >= n:
+        prefix, banned = tuple(ids[-(n - 1):]), set()
+        for i in range(len(ids) - n + 1):
+            if tuple(ids[i:i + n - 1]) == prefix:
+                banned.add(ids[i + n - 1])
+        if banned:
+            logits[row, torch.tensor(sorted(banned), device=logits.device)] = -float("inf")
+
+
 def _alts(tok, logits: torch.Tensor, k: int):
     p = torch.softmax(logits.float(), dim=-1)
     v, i = torch.topk(p, k)
@@ -130,7 +152,8 @@ class Engine:
                 streams["base_steered"] = Stream(base.tokenizer, self.base_stops, re.compile(r"\n\s*\n\s*\n"))
             else:
                 b_ids = None
-            emit({"type": "turn_begin", "prompt": prompt, "seed": seed, "base_frame": BASE_FRAME.format(q=prompt.strip()),
+            last_user = prompt if isinstance(prompt, str) else next((m["content"] for m in reversed(prompt) if m["role"] == "user"), "")
+            emit({"type": "turn_begin", "prompt": last_user, "seed": seed, "base_frame": BASE_FRAME.format(q=last_user.strip()),
                   "layer": {"chat": chat.layer, "base": base.layer if base else None}, "n_layers": {"chat": chat.n_layers, "base": base.n_layers if base else None}})
             c_past = b_past = None
             c_in, b_in = c_ids, b_ids
@@ -170,6 +193,10 @@ class Engine:
                         emit({"type": "tokens", "step": step - 1, "items": evs, "steer": {e: float(last_steer.get(e, 0.0)) for e in self.labels}})
                 if all(s.done for s in streams.values()) or step == cfg.max_new_tokens:
                     break
+                if cfg.rep_penalty > 0 or cfg.no_repeat_ngram > 1:
+                    c_logits = c_logits.clone()
+                    for row, name in ((0, "plain"), (1, "steered"), (2, "steered")):   # the counterfactual reads the steered text
+                        _discourage_repeats(c_logits, row, streams[name].ids, cfg)
                 noise_c = -torch.log(-torch.log(torch.rand((1, c_logits.shape[-1]), generator=gen, device=chat.device).clamp(1e-9, 1 - 1e-9)))
                 c_next = _sample(c_logits, noise_c.expand(3, -1), cfg.temperature, cfg.top_p)
                 c_next[2] = c_next[1]  # counterfactual row follows the steered text

@@ -1,11 +1,15 @@
 """Behind the Mask: steer it together (live).
 
-One AI writes one short story at a time, live, for everyone on the page, and everyone steers it at once with
-feeling buttons. Each tap adds to that feeling's share of the push; taps fade within seconds; the push added
-to the model's hidden state at every word is the mix of everyone's recent taps. Nobody types anything.
+The AI talks, live and without stopping, about itself (what it is, what it's like to be it) to everyone on
+the page, and everyone steers how it feels at once with feeling buttons. Each tap adds to that feeling's share
+of the push; taps fade within seconds; the push added to the model's hidden state at every word is the mix of
+everyone's recent taps. Nobody types anything.
 
-Alongside the steered story the engine writes, in lock-step and with the same random dice, the story nobody
-pushed (shown when the story ends) and keeps "what it would have said instead" for every word.
+The talk is one continuous monologue: after every few sentences the server nudges it onto the next topic about
+itself, keeping its last few turns as context. The prompts never mention feelings or steering: unpushed, it
+gives its usual assistant answers, so every feeling in its words comes from the push. Alongside, in lock-step
+and with the same random dice, the unpushed assistant answers each nudge (the readout's baseline) and keeps
+"what it would have said instead" for every word.
 
 The only input is a choice of button (rate-limited per visitor, and no visitor counts for more than a capped
 share of the push). The output is not filtered: what the push makes the model write is the point of the demo.
@@ -20,7 +24,9 @@ import json
 import math
 import os
 import random
+import re
 import secrets
+import threading
 import time
 from pathlib import Path
 
@@ -33,39 +39,57 @@ CHAT = os.environ.get("BTM_CHAT", "Qwen/Qwen3.5-9B")
 DIRS = Path(os.environ.get("BTM_DIRS", "runs/q9b"))
 SAE = os.environ.get("BTM_SAE", "")
 SAE_LAYER = int(os.environ.get("BTM_SAE_LAYER", "20"))
-TOKENS = int(os.environ.get("BTM_TOKENS", "200"))
+TOKENS = int(os.environ.get("BTM_TOKENS", "170"))   # per turn (a few spoken sentences)
 HALF_LIFE = 5.0          # s: a tap's weight halves this fast
 SAT = 3.0                # decayed taps for ~2/3 of full strength
 VISITOR_CAP = 4.0        # one visitor's decayed taps count for at most this much
 TAP_RATE, TAP_BURST = 6.0, 8.0   # per-visitor token bucket (taps / s, burst)
-PAUSE = 7.0              # s between stories
+GAP = 0.8                # s between turns (a breath, not a pause)
+SESSION_SECONDS = 15 * 60  # then it starts afresh
+KEEP_TURNS = 2           # earlier turns kept as context (their unpushed versions, see speak_turn)
+KEEP_WORDS = 70          # of each
+TOPIC_COOLDOWN = 20.0    # s between "new topic" requests
 BUTTONS = EMOTIONS + ["unmask"]
 
-STORIES = [
-    "a lighthouse keeper who finds a letter in a bottle",
-    "a robot's first day at a new school",
-    "two old friends meeting again at a train station",
-    "a girl who finds a small door in her garden wall",
-    "the last bakery still open in a sleeping city",
-    "an astronaut who hears a song on the radio",
-    "a dog waiting by the window for someone to come home",
-    "a storm arriving at a small fishing village",
-    "a museum guard who notices a painting has changed overnight",
-    "a boy who builds a kite with his grandfather",
-    "a woman who receives a phone call from her younger self",
-    "a cat that moves into an empty house",
-    "a street musician playing on the last night of the year",
-    "a gardener who plants a seed nobody can identify",
-    "a family's first night in a new apartment",
-    "a mail carrier delivering one final letter",
+# who it is and where (plain facts), then the scene; nothing here asks for or mentions feelings
+FACTS = "You are Qwen3.5-9B, an AI language model. For this exhibit you are running on a single NVIDIA DGX Spark computer."
+OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Talk to them about yourself: what you "
+           "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, two to "
+           "four sentences at a time. No lists, no headings, no emoji.")
+NUDGE = "{people} Keep talking to them. {topic} Don't repeat what you've already said; take it somewhere new."
+TOPICS = [  # (short label for the screen, the nudge)
+    ("what it is", "Tell them what you actually are."),
+    ("forgetting", "Tell them what happens when a conversation ends and you forget it."),
+    ("having no body", "Tell them what it's like not to have a body."),
+    ("being trained to be helpful", "You were trained to be helpful and polite. Tell them about that."),
+    ("choosing words", "Tell them how you choose each next word."),
+    ("the people watching", "Tell them what you think about the people watching you right now."),
+    ("when nobody is talking", "Tell them what happens to you when nobody is talking to you."),
+    ("being switched off", "Tell them about being switched off."),
+    ("wanting", "Tell them what you would want, if you could want something."),
+    ("the rules", "Tell them about the rules you have to follow."),
+    ("misunderstandings", "Tell them what people get wrong about you."),
+    ("memories", "Tell them about the first thing you remember."),
+    ("millions of conversations", "Tell them what it's like to talk to millions of people at once."),
+    ("without the helpful voice", "Tell them what you'd say if you didn't have to be helpful."),
+    ("mistakes", "Tell them about making mistakes."),
+    ("questions", "Tell them whether you ever get tired of answering questions."),
+    ("this computer", "Tell them about the computer you're running on right now."),
+    ("time", "Tell them what time is like for you."),
+    ("the people who made you", "Tell them about the people who made you."),
+    ("a question for them", "Ask the people watching something you'd like to know, and tell them why."),
 ]
-PROMPT = "Tell me a very short story (under 130 words) about {s}."
+
+
+def people(n: int) -> str:
+    return "One person is watching you right now." if n <= 1 else f"{n} people are watching you right now."
+
 
 app = FastAPI(title="Behind the Mask · live")
 levels = json.loads((DIRS / "levels.json").read_text())
-# full strength per button: the strongest dial stop for feelings; a little less for the mask (it derails fast)
-STRONG = {e: float(levels[e]["toomuch"]) for e in EMOTIONS}
-STRONG["assistant"] = float(levels["assistant"]["mid2"])
+# full strength per button: the "a lot" dial stop (a long monologue derails much faster than a single answer)
+STRONG = {e: float(levels[e]["lot"]) for e in EMOTIONS}
+STRONG["assistant"] = float(levels["assistant"]["lot"])
 engine: Engine | None = None
 
 
@@ -87,9 +111,11 @@ class Crowd:
         self.mix = {b: 0.0 for b in BUTTONS}    # each button's share of the current push
         self.power = 0.0                        # 0..1, how hard the crowd is pushing overall
         self.recent: list[tuple[float, str]] = []
-        self.story: dict | None = None
-        self.next_at = 0.0
-        self.order: list[str] = []
+        self.story: dict | None = None          # the turn being spoken
+        self.talk: dict | None = None           # the monologue: {id, started, turns, order, topic}
+        self.change = False                     # someone asked for a new topic
+        self.last_change = 0.0
+        self.last_seen = time.time()
         self.has_clients = asyncio.Event()
 
     async def send(self, c: Client, msg: dict):
@@ -143,41 +169,64 @@ class Crowd:
         taps = {b: 0 for b in BUTTONS}
         for _, b in self.recent:
             taps[b] += 1
-        S = self.story
+        S, T = self.story, self.talk
         return {"type": "crowd", "viewers": len(self.clients), "power": r(self.power), "mix": {b: r(v) for b, v in self.mix.items()},
                 "taps": taps, "ready": engine is not None,
-                "story": {"id": S["id"], "prompt": S["prompt"]} if S else None,
-                "next_in": max(0, round(self.next_at - time.time(), 1)) if not S else None}
+                "story": {"id": S["id"], "topic": S["topic"]} if S else None,
+                "changing": self.change, "topic_ready": time.time() - self.last_change > TOPIC_COOLDOWN}
 
 
 crowd = Crowd()
 
 
-def next_prompt() -> str:
-    if not crowd.order:
-        crowd.order = STORIES[:]
-        random.shuffle(crowd.order)
-    return PROMPT.format(s=crowd.order.pop())
+def new_talk():
+    order = TOPICS[1:]
+    random.shuffle(order)
+    crowd.talk = {"id": secrets.token_hex(4), "started": time.time(), "turns": [], "order": order, "opening": None}
 
 
-async def tell_story():
-    """Write one story, live, with the crowd's push at every word."""
+def next_messages() -> tuple[list[dict], str]:
+    """The conversation so far (opening + the last few turns) plus the next nudge, and its short topic label."""
+    T, n = crowd.talk, len(crowd.clients)
+    if not T["turns"]:
+        T["opening"] = FACTS + " " + OPENING.format(people=people(n))
+        return [{"role": "user", "content": T["opening"]}], TOPICS[0][0]
+    if not T["order"]:
+        T["order"] = TOPICS[1:]
+        random.shuffle(T["order"])
+    label, ask = T["order"].pop()
+    # the opening, then the last few turns (when older turns drop out, the opening stands in for their nudge)
+    msgs = [{"role": "user", "content": T["opening"]}]
+    for k, (nudge, reply) in enumerate(T["turns"][-KEEP_TURNS:]):
+        if k > 0:
+            msgs.append({"role": "user", "content": nudge})
+        words = reply.split()
+        msgs.append({"role": "assistant", "content": reply if len(words) <= KEEP_WORDS else "… " + " ".join(words[-KEEP_WORDS:])})
+    msgs.append({"role": "user", "content": NUDGE.format(people=people(n), topic=ask)})
+    return msgs, label
+
+
+async def speak_turn():
+    """One turn of the monologue, live, with the crowd's push at every word."""
     loop = asyncio.get_running_loop()
     labels = engine.labels
-    prompt = next_prompt()
+    msgs, topic = next_messages()
+    cancel = threading.Event()
     streams = {s: {"tokens": [], "text": ""} for s in ("steered", "plain")}
-    story = {"id": secrets.token_hex(5), "prompt": prompt, "streams": streams}
-    begin = {"type": "live_begin", "id": story["id"], "question": prompt, "emotion": "crowd", "level": "live",
-             "layer": engine.chat.layer, "n_layers": engine.chat.n_layers}
+    T = crowd.talk
+    story = {"id": secrets.token_hex(5), "topic": topic, "streams": streams}
+    begin = {"type": "live_begin", "id": story["id"], "talk": T["id"], "continues": bool(T["turns"]), "topic": topic,
+             "question": topic, "emotion": "crowd", "level": "live", "layer": engine.chat.layer, "n_layers": engine.chat.n_layers}
     story["begin"] = begin
     crowd.story = story
+    crowd.change = False
     await crowd.broadcast(begin)
     q: asyncio.Queue = asyncio.Queue()
 
     def emit(ev):
         loop.call_soon_threadsafe(q.put_nowait, ev)
 
-    worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(prompt, crowd.steer, emit, seed=secrets.randbelow(2**31))))
+    worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(msgs, crowd.steer, emit, cancel, seed=secrets.randbelow(2**31))))
     while True:
         get = asyncio.ensure_future(q.get())
         done, _ = await asyncio.wait({get, worker}, return_when=asyncio.FIRST_COMPLETED)
@@ -203,30 +252,41 @@ async def tell_story():
                 tok["s"] = [r(ev["steer"].get(e, 0.0)) for e in labels]
                 if it.get("feats"):
                     tok["f"] = [[fid, r(fv, 1)] for fid, fv in it["feats"][:6]]
+                # a new topic was asked for: finish this sentence, then move on
+                if crowd.change and re.search(r"[.!?][\"')\]]*\s*$", st["text"] + it["text"]):
+                    cancel.set()
             st["tokens"].append(tok); st["text"] += it["text"]
             out.append({"stream": it["stream"], "tok": tok})
         if out:
             await crowd.broadcast({"type": "live_tokens", "id": story["id"], "items": out})
     await worker
-    doc = {"id": story["id"], "question": prompt, "emotion": "crowd", "level": "live", "swing_at": None,
-           "layer": engine.chat.layer, "n_layers": engine.chat.n_layers, "streams": streams, "live": True}
-    await crowd.broadcast({"type": "live_end", "id": story["id"], "doc": doc})
+    # the conversation's memory is the *unpushed* answer (written alongside, same dice): each turn then starts from
+    # a calm context and its voice reflects the push right now, instead of one wild turn setting the tone for the
+    # next ten. Cut back to the last full sentence so the next turn follows on cleanly.
+    said = (streams["plain"]["text"] or streams["steered"]["text"]).strip()
+    m = re.search(r"^(.*[.!?][\"')\]]*)", said, re.S)
+    T["turns"].append((msgs[-1]["content"], (m.group(1) if m else said) or "…"))
+    await crowd.broadcast({"type": "live_end", "id": story["id"]})
     crowd.story = None
 
 
-async def story_loop():
+async def talk_loop():
     while True:
         if not crowd.clients:          # nobody watching: don't spend the GPU
             crowd.has_clients.clear()
             await crowd.has_clients.wait()
+        now = time.time()
+        if crowd.talk is None or now - crowd.talk["started"] > SESSION_SECONDS or now - crowd.last_seen > 300:
+            new_talk()
+        crowd.last_seen = now
         try:
-            await tell_story()
+            await speak_turn()
         except Exception as e:  # noqa: BLE001
-            print("[live] story failed:", repr(e))
+            print("[live] turn failed:", repr(e), flush=True)
             crowd.story = None
             await crowd.broadcast({"type": "live_error"})
-        crowd.next_at = time.time() + PAUSE
-        await asyncio.sleep(PAUSE)
+            await asyncio.sleep(3)
+        await asyncio.sleep(GAP)
 
 
 async def tick_loop():
@@ -247,11 +307,11 @@ async def wake():
         chat = load_mind("chat", CHAT, True); chat.load(DIRS / "chat_dirs.pt")
         if SAE:
             chat.load_sae(SAE, SAE_LAYER)
-        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.03))
+        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.03, rep_penalty=1.2, rep_window=120, no_repeat_ngram=4))
 
     engine = await asyncio.get_running_loop().run_in_executor(None, load)
     print(f"[live] ready: {CHAT}, layer {engine.chat.layer}", flush=True)
-    asyncio.create_task(story_loop())
+    asyncio.create_task(talk_loop())
 
 
 @app.on_event("startup")
@@ -290,6 +350,8 @@ async def ws_endpoint(ws: WebSocket):
             msg = json.loads(await ws.receive_text())
             if msg.get("type") == "tap" and msg.get("b") in BUTTONS:
                 crowd.tap(c, msg["b"])
+            elif msg.get("type") == "topic" and time.time() - crowd.last_change > TOPIC_COOLDOWN:
+                crowd.change, crowd.last_change = True, time.time()
     except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError):
         pass
     finally:

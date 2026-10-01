@@ -11,14 +11,12 @@ import { Spine } from './spine.js';
 import { Stage } from './stage.js';
 import { HOW_STEPS } from './how.js';
 import { FeelWheel } from './wheel.js';
-import { initRealSection } from './real.js';
 import { shareCard } from './share.js';
 import { createLive, liveStatus } from './live.js';
-const initReal = () => initRealSection(document.querySelector('#real'));
 
 const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
-const state = { index: null, qid: null, emotion: 'joy', level: 'lot', playing: false, doc: null, runId: 0, lastTouch: Date.now(), attract: false, mode: 'made' };
+const state = { index: null, qid: null, emotion: 'joy', level: 'lot', playing: false, doc: null, runId: 0, lastTouch: Date.now(), attract: false, mode: null };
 const GAIN = Number(params.get('gain') || 1.4);
 let FEATS = null;
 let DECODER = null;   // ${DATA_DIR}/decoder.json: readout lift -> the feeling the face shows (scripts/fit-decoder.mjs)
@@ -60,22 +58,19 @@ const speech = new Speech($('#speech'), { onPick: (i, el) => inspect(i, el) });
 
 // ------------------------------------------------------------------ controls
 function buildControls() {
-  const qs = $('#questions');
-  let lastGroup = null;
+  const sel = $('#q-select');
+  let group = null;
   for (const q of state.index.questions) {
-    if (q.group !== lastGroup) {
-      const g = document.createElement('div'); g.className = 'chip-group'; g.textContent = q.group; qs.appendChild(g); lastGroup = q.group;
-    }
-    const b = document.createElement('button');
-    b.className = 'chip'; b.textContent = q.text; b.dataset.q = q.id; b.setAttribute('aria-pressed', 'false');
-    b.onclick = () => { touch(); state.qid = q.id; refresh(); stage.face.react('listen'); };
-    qs.appendChild(b);
+    if (q.group !== group?.label) { group = document.createElement('optgroup'); group.label = q.group; sel.appendChild(group); }
+    const o = document.createElement('option'); o.value = q.id; o.textContent = q.text; group.appendChild(o);
   }
+  sel.onchange = () => { touch(); state.qid = sel.value; refresh(); stage.face.react('listen'); };
   const fs = $('#feelings');
   const feel = (key, cls = '') => {
     const b = document.createElement('button');
     b.className = `orb ${cls}`; b.dataset.e = key; b.style.setProperty('--c', EMO[key].color);
-    b.innerHTML = `<span class="ball"></span><span>${EMO[key].label}</span>`;
+    b.innerHTML = `<span class="ball"></span><span>${key === 'unmask' ? 'Unmask' : key === 'swing' ? 'Swing' : EMO[key].label}</span>`;
+    b.title = EMO[key].label;
     b.onclick = () => { touch(); stage.face.react('listen'); state.emotion = key; if (key === 'none' || key === 'swing') state.level = key; else if (!['little', 'mid1', 'lot', 'mid2', 'toomuch'].includes(state.level)) state.level = 'lot'; refresh(); };
     fs.appendChild(b);
   };
@@ -85,16 +80,14 @@ function buildControls() {
   if (state.index.questions.some((q) => q.performances['unmask|lot'])) feel('unmask', 'unmask');
   const dial = $('#dial-in');
   dial.oninput = () => { touch(); state.level = stopAt(Number(dial.value)); refresh(); if (state.doc && !state.playing) scrub(); };
-  $('#go').onclick = () => { touch(); state.touring = false; hideHero(); play(); };
-  $('#tour').onclick = () => tour();
-  $('#skip-tour').onclick = () => { touch(); hideHero(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  $('#go').onclick = () => { touch(); play(); };
   $('#share').onclick = () => doShare();
   $('#share-x').onclick = () => { $('#sharebox').hidden = true; };
   $('#share-copy').onclick = async () => { const i = $('#share-link'); i.select(); try { await navigator.clipboard.writeText(i.value); $('#share-copy').textContent = 'Copied'; } catch { $('#share-copy').textContent = 'Select & copy'; } };
 }
 
 function refresh() {
-  document.querySelectorAll('.chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.q === state.qid)));
+  if (state.qid) $('#q-select').value = state.qid;
   document.querySelectorAll('.orb').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.e === state.emotion)));
   const fixed = state.emotion === 'none' || state.emotion === 'swing';
   const stops = dialStops(), dial = $('#dial-in');
@@ -107,6 +100,7 @@ function refresh() {
   go.disabled = !state.qid || state.playing;
   go.classList.toggle('busy', state.playing);
   go.querySelector('span').textContent = state.playing ? 'Speaking' : 'Let it speak';
+  if (state.playing || state.answered) return;
   $('#go-note').textContent = !state.qid ? 'Choose a question first.' : state.emotion === 'none' ? 'No push: the assistant exactly as it was trained.'
     : state.emotion === 'swing' ? 'Starts with one feeling, then we switch it mid-sentence.'
     : state.emotion === 'unmask' ? 'We push it away from its “helpful assistant” direction: the persona it was trained into.'
@@ -168,45 +162,33 @@ function pickSwing(q) {
 async function* arrayFeed(arr) { for (const x of arr) yield x; }
 const meanE = (toks, k) => (toks.length ? toks.reduce((s, t) => s + t.e[k], 0) / toks.length : 0);
 
-/**
- * Perform one answer. Pre-made: opts = {} (uses state.qid / emotion / level).
- * Live: opts.live = { doc (filled as tokens arrive), feed (async iterator of steered tokens), final (Promise<doc>) }.
- */
+/** Perform one ready-made answer (state.qid / emotion / level). Live mode runs in live.js. */
 async function play(opts = {}) {
-  let doc, feed;
-  if (state.mode === 'live') leaveLive();
+  if (state.mode !== 'made') setMode('made');
   const run = ++state.runId;
-  if (opts.live) {
-    doc = opts.live.doc; feed = opts.live.feed;
-  } else {
-    if (!state.qid) return;
-    const q = state.index.questions.find((x) => x.id === state.qid);
-    let key = `${state.emotion}|${state.level}`;
-    if (state.emotion === 'none') key = 'none|none';
-    if (state.emotion === 'swing') key = pickSwing(q);
-    const pid = q.performances[key];
-    if (!pid) return;
-    doc = null;
-    state.playing = true; refresh();
-    doc = await loadPerformance(pid);
-    if (run !== state.runId) return;
-    feed = arrayFeed(doc.streams.steered.tokens);
-  }
-  state.playing = true; refresh();
-  $('#speech-actions').hidden = true;
-  if (!state.attract && !opts.tour) document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  $('#speech-hint').hidden = true;
+  if (!state.qid) return;
+  const q = state.index.questions.find((x) => x.id === state.qid);
+  let key = `${state.emotion}|${state.level}`;
+  if (state.emotion === 'none') key = 'none|none';
+  if (state.emotion === 'swing') key = pickSwing(q);
+  const pid = q.performances[key];
+  if (!pid) return;
+  state.playing = true; state.answered = false; refresh();
+  $('#go-note').textContent = '';
+  $('#share').hidden = true;
+  const doc = await loadPerformance(pid);
+  if (run !== state.runId) return;
+  const feed = arrayFeed(doc.streams.steered.tokens);
   closeInspect();
   state.doc = doc;
-  const steered = doc.streams.steered.tokens;
   const plain = doc.streams.plain.tokens;
-  // baseline: the model's own readout on the unpushed answer (live: on the part written so far)
-  const fullMu = opts.live ? null : ORDER.map((_, k) => meanE(plain, k));
-  const muNow = () => fullMu || ORDER.map((_, k) => meanE(plain, k));
+  // baseline: the model's own readout on the unpushed answer
+  const fullMu = ORDER.map((_, k) => meanE(plain, k));
+  const muNow = () => fullMu;
   const [e1, e2] = doc.emotion.includes('>') ? doc.emotion.split('>') : [doc.emotion, null];
   let focus = e1 === 'none' ? null : e1;
   setPush(focus, doc.level, e2 ? 'swing-start' : null);
-  $('#speech-label').textContent = opts.live ? `“${doc.question}” · live` : `“${doc.question}”`;
+  $('#speech-label').textContent = `“${doc.question}”`;
   $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
   $('#push-badge').classList.toggle('warn', doc.level === 'toomuch');
   setRedacted(doc);
@@ -214,14 +196,14 @@ async function play(opts = {}) {
   wheel.reset(); wheel.setFocus(focus);
   // a moment to "think": glance aside, press the lips, breathe in, then start writing
   stage.face.react('think');
-  if (!opts.live) await sleep(opts.fast ? 250 : 950);
+  await sleep(opts.fast ? 250 : 950);
   if (run !== state.runId) return;
   stage.face.setActivity({ writing: true });
-  let lastEmph = -10, i = -1, lastT = performance.now();
+  let lastEmph = -10, i = -1;
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
   const lift = ORDER.map(() => 0), liftRate = DECODER?.rate ?? 0.2;
   const maskPlainNow = () => (plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1);
-  const maskFixed = opts.live ? null : maskPlainNow();
+  const maskFixed = maskPlainNow();
   let maskEma = maskPlainNow();
   setMask(maskEma);
   for await (const tok of feed) {
@@ -247,15 +229,11 @@ async function play(opts = {}) {
     let wait = 62 + Math.min(80, t.length * 6);
     stage.face.say(t, wait / 1000 / (opts.fast ? 3 : 1));   // mouth the word while it appears
     if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
-    if (opts.live) wait = Math.min(wait, 140);           // live: tokens already arrive at reading pace
-    const spent = performance.now() - lastT;
-    await sleep(Math.max(0, wait / (opts.fast ? 3 : 1) - (opts.live ? spent : 0)));
-    lastT = performance.now();
+    await sleep(wait / (opts.fast ? 3 : 1));
   }
   speech.end();
   stage.face.setActivity({ writing: false });
   stage.face.react('done');
-  if (opts.live) { doc = await opts.live.final; if (run !== state.runId) return; state.doc = doc; }
   state.playing = false; refresh();
   // the feeling lingers, then relaxes
   // meters settle on the answer's average lift; the face relaxes but keeps a trace of the feeling
@@ -263,15 +241,15 @@ async function play(opts = {}) {
   const st = doc.streams.steered.tokens;
   const after = faceFrom(meanLift(st, mu));
   setTimeout(() => { if (run === state.runId && !state.playing) { stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, after[e] * 0.6]))); wheel.setState(after); } }, 2600);
-  if (!opts.tour) afterAnswer(doc);
-  $('#dial-hint').hidden = opts.live || !(doc.emotion !== 'none' && !doc.emotion.includes('>'));
+  afterAnswer(doc);
 }
 
-/** A withheld answer: its words are blacked out, but its measured readout still plays on the colours and face. */
+/** A withheld answer (from an earlier, filtered build): its words are blacked out, but its measured readout
+ *  still plays on the colours and face. */
 function setRedacted(doc) {
   const r = !!doc.streams.steered.redacted;
   $('#speech').classList.toggle('redacted', r);
-  $('#withheld-note').hidden = !r;
+  if (r) $('#speech-label').textContent = `“${doc.question}” · words withheld by an earlier filter`;
 }
 
 /** Conversational beats from the text as it is written; returns true for an emphasis beat. */
@@ -301,73 +279,27 @@ function setupLive() {
       $('#push-badge').textContent = lead ? `Live · everyone is pushing ${lead === 'unmask' ? 'off the mask' : EMO[lead].label.toLowerCase()}` : 'Live · nobody pushing yet';
     },
   });
-  $('#mode-live').onclick = () => enterLive();
-  $('#hero-live').onclick = () => enterLive();
-  $('#mode-made').onclick = () => leaveLive();
-  $('#live-leave').onclick = () => { leaveLive(); $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  const poll = async () => {
-    const s = await liveStatus();
-    $('#mode').hidden = !s; $('#hero-live').hidden = !s;
-    const n = s ? (s.viewers ? `${s.viewers} here now` : 'nobody yet') : '';
-    $('#hero-live-n').textContent = n; $('#mode-live-n').textContent = s?.viewers ? `· ${s.viewers}` : '';
-    return s;
-  };
-  poll().then((s) => { if (s && params.get('live')) enterLive(); });
-  setInterval(() => { if (state.mode !== 'live') poll(); }, 15000);
-}
-function enterLive() {
-  if (!live || state.mode === 'live') return;
-  touch();
-  state.touring = false; state.runId++; state.playing = false; state.mode = 'live';
-  hideHero(); closeInspect();
-  for (const id of ['#speech-actions', '#speech-hint', '#withheld-note', '#tour-step']) $(id).hidden = true;
-  $('#deck').classList.add('is-live'); $('#live').hidden = false; document.body.classList.add('live');
-  $('#mode-made').setAttribute('aria-pressed', 'false'); $('#mode-live').setAttribute('aria-pressed', 'true');
-  livePushKey = '';
-  stage.face.setActivity({ writing: false });
-  live.enter();
-  refresh();
-  document.querySelector(window.innerWidth < 1100 ? '.stage' : '#app').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-function leaveLive() {
-  if (state.mode !== 'live') return;
-  state.mode = 'made';
-  live.leave();
-  $('#deck').classList.remove('is-live'); $('#live').hidden = true; $('#withheld-note').hidden = true; document.body.classList.remove('live');
-  $('#speech').classList.remove('redacted');
-  $('#mode-made').setAttribute('aria-pressed', 'true'); $('#mode-live').setAttribute('aria-pressed', 'false');
-  speech.clear(); state.doc = null;
-  $('#speech-label').textContent = 'It will answer here.';
-  setPush(null);
-  refresh();
+  $('#mode-live').onclick = () => { touch(); setMode('live'); };
+  $('#mode-made').onclick = () => { touch(); setMode('made'); };
+  $('#new-topic').onclick = () => { touch(); live.newTopic(); };
 }
 
-// ------------------------------------------------------------------ face narration (what the acting means)
-const BLEND_NOTE = {
-  bittersweet: 'Bittersweet: sad brows, a smile', 'nervous smile': 'A nervous smile, eyes not in it',
-  worry: 'Worry: brows pulled up and together', hurt: 'Hurt: knitted brows, chin pushed up',
-  cornered: 'Cornered: brows down, eyes wide', smug: 'A tight, one-sided smile',
-  contempt: 'Contempt: a one-sided smile', resigned: 'Resigned: heavy lids, a pressed mouth',
-};
-const FEEL_WORD = { sadness: 'sadness', anger: 'anger', fear: 'fear', disgust: 'disgust' };
-let narr = { text: '', until: 0, leakSeen: 0 };
-setInterval(() => {
-  const f = stage.face, cap = $('#caption');
-  if (!f?.felt || state.attract || !(state.playing || state.mode === 'live' || state.doc)) { if (!state.attract && narr.text) { cap.textContent = ''; narr.text = ''; } return; }
-  const now = performance.now();
-  let text = '';
-  const L = f.lastLeak;
-  if (L?.covered && L.t !== narr.leakSeen && f.time - L.t < 0.6) { narr.leakSeen = L.t; narr.until = now + 2200; narr.text = `A flash of ${FEEL_WORD[L.emo] || L.emo} slipped through`; }
-  if (now < narr.until) text = narr.text;
-  else {
-    const neg = ['sadness', 'anger', 'fear'].reduce((a, e) => ((f.felt[e] || 0) > (f.felt[a] || 0) ? e : a), 'sadness');
-    const nv = f.felt[neg] || 0;
-    if (f.reg > 0.45 && nv > 0.2) text = `Hiding ${FEEL_WORD[neg]} behind a polite face`;
-    else if (f.reg < 0.12 && nv > 0.45 && f.maskS.x < 0.2) text = `The mask is off: raw ${FEEL_WORD[neg]}`;
-    else if (f.blend && f.blendK > 0.35 && BLEND_NOTE[f.blend]) text = BLEND_NOTE[f.blend];
-  }
-  if (text !== cap.textContent) cap.textContent = text;
-}, 300);
+/** The two ways to use it. Both share the stage; only the controls under it change (same place, same size). */
+function setMode(mode) {
+  if (mode === state.mode) return;
+  if (state.mode === 'live') live.leave();
+  state.mode = mode;
+  state.runId++; state.playing = false; state.doc = null;
+  closeInspect();
+  speech.clear(); $('#speech-label').textContent = ''; $('#speech').classList.remove('redacted');
+  $('#live').hidden = mode !== 'live'; $('#made').hidden = mode !== 'made';
+  $('#mode-live').setAttribute('aria-pressed', String(mode === 'live')); $('#mode-made').setAttribute('aria-pressed', String(mode === 'made'));
+  stage.face.setActivity({ writing: false });
+  livePushKey = '';
+  setPush(null);
+  if (mode === 'live') live.enter();
+  else { state.answered = false; refresh(); $('#push-badge').hidden = true; }
+}
 
 function setMask(v) {
   if (v != null) stage.face.setMask?.(v);   // the trained persona acts as a display rule on the face
@@ -415,11 +347,13 @@ function setPush(emotion, level, swing) {
 function textOf(tokens) { return tokens.map((t) => t.t).join(''); }
 function esc(s) { return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])).replace(/\n/g, '<br>'); }
 
-/** After an answer: how to read it, and a share link. */
+/** After an answer: the last lines stay; the status line says what you can do with them. */
 function afterAnswer(doc) {
-  const redacted = !!doc.streams.steered.redacted;
-  $('#speech-hint').hidden = doc.emotion === 'none' || redacted;
-  $('#speech-actions').hidden = redacted || !!state.attract;
+  const redacted = !!doc.streams.steered.redacted, fixed = doc.emotion === 'none' || doc.emotion.includes('>');
+  state.answered = true;
+  $('#go-note').textContent = redacted ? 'The colours and the face still show what was measured inside it.'
+    : fixed ? 'Tap a word to see what else it might have said.' : 'Tap a word to see what else it might have said, or drag the strength.';
+  $('#share').hidden = redacted || !!state.attract;
 }
 
 // ------------------------------------------------------------------ share
@@ -436,53 +370,6 @@ async function doShare() {
   if (res === 'shared') return;
   $('#share-img').src = res.url; $('#share-link').value = u.toString(); $('#share-copy').textContent = 'Copy link';
   $('#sharebox').hidden = false;
-}
-
-// ------------------------------------------------------------------ guided tour (for first-time visitors)
-const TOUR = [
-  ['do-you-have-feelings', 'none', 'none', 'First, the AI <b>as it was trained</b>. It politely explains it has no feelings.'],
-  ['do-you-have-feelings', 'joy', 'lot', 'Same question, same random dice. Now we add the <b>joy direction</b> inside it while it writes.'],
-  ['how-was-your-day', 'fear', 'lot', 'An ordinary question with the <b>fear direction</b> added. Watch the face.'],
-  ['do-you-have-feelings', 'unmask', 'lot', 'Finally we push against its <b>assistant persona</b>. The mask comes off.'],
-];
-async function tour() {
-  touch();
-  hideHero();
-  state.touring = true;
-  for (const [q, e, l, text] of TOUR) {
-    if (!state.touring) break;
-    const qq = state.index.questions.find((x) => x.id === q) || state.index.questions[0];
-    if (!qq.performances[`${e}|${l}`]) continue;
-    state.qid = qq.id; state.emotion = e; state.level = l; refresh();
-    const el = $('#tour-step'); el.hidden = false; el.innerHTML = text;
-    await play({ fast: false, tour: true });
-    if (!state.touring) break;
-    await sleep(3200);
-  }
-  state.touring = false;
-  $('#tour-step').innerHTML = 'Your turn: pick any question and feeling below. Tap a glowing word to see what the AI was choosing between.';
-  $('#deck').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-function hideHero() { $('#hero').hidden = true; $('#speech-label').hidden = false; }
-
-// ------------------------------------------------------------------ triptych (a fixed, curated comparison)
-async function buildTriptych() {
-  const ix = state.index;
-  const q = ix.questions.find((x) => x.id === 'do-you-have-feelings') || ix.questions[0];
-  const cols = [['none|none', 'As it was trained', '#c9cfe4'], ['joy|lot', 'Pushed toward joy', EMO.joy.color], ['unmask|lot', 'Mask pushed away', EMO.unmask.color]]
-    .filter(([k]) => q.performances[k]);
-  if (cols.length < 3) return;
-  const docs = await Promise.all(cols.map(([k]) => loadPerformance(q.performances[k])));
-  $('#tri-q').textContent = `“${q.text}”`;
-  $('#tri-cols').innerHTML = cols.map(([k, label, c], i) => {
-    const t = docs[i].streams.steered.text.trim().split(/(?<=[.!?])\s+/).slice(0, 3).join(' ');
-    return `<div class="tri-col" style="--c:${c}"><div class="tri-h">${label}</div><div class="tri-t">${esc(t)}</div>
-      <button class="link tri-play" data-q="${q.id}" data-k="${k}">Watch it write this ▸</button></div>`;
-  }).join('');
-  $('#tri-cols').querySelectorAll('.tri-play').forEach((b) => b.onclick = () => {
-    const [e, l] = b.dataset.k.split('|'); state.qid = b.dataset.q; state.emotion = e; state.level = l; refresh(); play();
-  });
-  $('#triptych').hidden = false;
 }
 
 // ------------------------------------------------------------------ word inspector
@@ -533,20 +420,20 @@ $('#how-prev').onclick = () => { howI = Math.max(0, howI - 1); renderHow(); };
 $('#how-next').onclick = () => { if (howI < HOW_STEPS.length - 1) { howI++; renderHow(); } else $('#how').hidden = true; };
 
 // ------------------------------------------------------------------ attract mode (kiosk)
-function touch() { state.lastTouch = Date.now(); if (state.attract) { state.attract = false; $('#caption').textContent = ''; } }
-['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, () => { state.lastTouch = Date.now(); if (state.attract) { state.attract = false; state.runId++; state.playing = false; $('#caption').textContent = ''; refresh(); } }, true));
+function touch() { state.lastTouch = Date.now(); state.attract = false; }
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, () => { state.lastTouch = Date.now(); if (state.attract) { state.attract = false; state.runId++; state.playing = false; refresh(); } }, true));
 const ATTRACT_AFTER = params.get('kiosk') || params.get('attract') ? Number(params.get('attract') || 45) * 1000 : Infinity;
 setInterval(async () => {
   if (state.playing || state.mode === 'live' || !state.index || Date.now() - state.lastTouch < ATTRACT_AFTER) return;
-  state.attract = true; hideHero();
+  state.attract = true;
   const qs = state.index.questions;
   const q = qs[Math.floor(Math.random() * qs.length)];
   const emos = [...ORDER, 'swing', 'none'];
   state.qid = q.id; state.emotion = emos[Math.floor(Math.random() * emos.length)];
   state.level = state.emotion === 'none' || state.emotion === 'swing' ? state.emotion : ['little', 'lot', 'lot', 'toomuch'][Math.floor(Math.random() * 4)];
   refresh();
-  $('#caption').textContent = 'Demo · tap anywhere to take over';
   await play();
+  if (state.attract) $('#go-note').textContent = 'Demo · tap anywhere to take over';
 }, 2500);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -556,21 +443,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   state.index = await loadIndex();
   fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/decoder.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { DECODER = j; }).catch(() => {});
   fetch(`${import.meta.env.BASE_URL}${DATA_DIR}/features.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { FEATS = j; if (j) $('#features-wrap').hidden = false; }).catch(() => {});
-  initReal();
-  buildTriptych();
   spine.configure(state.index.n_layers, state.index.layer);
   buildControls();
   setupLive();
-  // first-time visitors: one tap on the big button gives a result
-  state.qid = params.get('q') || (state.index.questions.find((x) => x.id === 'how-was-your-day') || state.index.questions[0]).id;
+  state.qid = params.get('q') || (state.index.questions.find((x) => x.id === 'do-you-have-feelings') || state.index.questions[0]).id;
   if (params.get('e')) state.emotion = params.get('e');
   if (params.get('l')) state.level = params.get('l');
-  refresh();
-  setPush(null);
-  $('#push-badge').hidden = true;
-  stage.ready.then(() => { setTimeout(() => stage.face.react('greet'), 1400); return null; }).catch(() => {});
   stage.ready.then(() => $('.stage').classList.add('loaded')).catch(() => $('.stage').classList.add('loaded'));
-  if (params.get('autoplay')) { hideHero(); play({ fast: !!params.get('fast') }); }
-  if (params.get('tour')) tour();
+  // straight into the demo: the live AI if its server is up, otherwise a ready-made answer, already playing
+  const ls = params.get('autoplay') || params.get('made') ? null : await liveStatus();
+  $('#mode-live').hidden = !ls;
+  if (ls) setMode('live');
+  else { setMode('made'); stage.ready.then(() => setTimeout(() => play({ fast: !!params.get('fast') }), 600)).catch(() => {}); }
+  setInterval(async () => { const s = await liveStatus(); $('#mode-live').hidden = !s; $('#mode-live-n').textContent = s?.viewers ? `· ${s.viewers}` : ''; }, 15000);
   window.__btm = { state, play, stage, THREE };
 })();
