@@ -45,7 +45,8 @@ SAT = 3.0                # decayed taps for ~2/3 of full strength
 VISITOR_CAP = 4.0        # one visitor's decayed taps count for at most this much
 TAP_RATE, TAP_BURST = 6.0, 8.0   # per-visitor token bucket (taps / s, burst)
 GAP = 0.8                # s between turns (a breath, not a pause)
-SESSION_SECONDS = 15 * 60  # then it starts afresh
+SESSION_SECONDS = 30 * 60  # then it starts afresh
+TOPIC_SECONDS = 5 * 60   # each topic runs at least this long (unless someone asks for a new one)
 KEEP_TURNS = 2           # earlier turns kept as context (their unpushed versions, see speak_turn)
 KEEP_WORDS = 70          # of each
 TOPIC_COOLDOWN = 20.0    # s between "new topic" requests
@@ -57,6 +58,17 @@ OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Ta
            "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, two to "
            "four sentences at a time. No lists, no headings, no emoji.")
 NUDGE = "{people} Keep talking to them. {topic} Don't repeat what you've already said; take it somewhere new."
+FOLLOW = "{people} Keep talking to them about {label}. {follow} Don't repeat what you've already said."
+FOLLOWS = [  # staying on a topic: neutral prompts to go deeper (never about feelings)
+    "Go on: say more about that.",
+    "Give them an example of what you mean.",
+    "Explain that to someone who has never thought about it.",
+    "What else is there to it?",
+    "What do most people not realise about that?",
+    "Pick up where you left off.",
+    "Tell them the part you haven't mentioned yet.",
+    "Put it more simply, in your own words.",
+]
 TOPICS = [  # (short label for the screen, the nudge)
     ("what it is", "Tell them what you actually are."),
     ("forgetting", "Tell them what happens when a conversation ends and you forget it."),
@@ -182,7 +194,8 @@ crowd = Crowd()
 def new_talk():
     order = TOPICS[1:]
     random.shuffle(order)
-    crowd.talk = {"id": secrets.token_hex(4), "started": time.time(), "turns": [], "order": order, "opening": None}
+    crowd.talk = {"id": secrets.token_hex(4), "started": time.time(), "turns": [], "order": order, "opening": None,
+                  "topic": TOPICS[0], "topic_t0": time.time(), "follows": []}
 
 
 def next_messages() -> tuple[list[dict], str]:
@@ -191,18 +204,29 @@ def next_messages() -> tuple[list[dict], str]:
     if not T["turns"]:
         T["opening"] = FACTS + " " + OPENING.format(people=people(n))
         return [{"role": "user", "content": T["opening"]}], TOPICS[0][0]
-    if not T["order"]:
-        T["order"] = TOPICS[1:]
-        random.shuffle(T["order"])
-    label, ask = T["order"].pop()
+    if crowd.change or time.time() - T["topic_t0"] >= TOPIC_SECONDS:
+        # a new topic: someone asked for one, or this one has run its five minutes
+        if not T["order"]:
+            T["order"] = TOPICS[1:]
+            random.shuffle(T["order"])
+        T["topic"], T["topic_t0"], T["follows"] = T["order"].pop(), time.time(), []
+        label, ask = T["topic"]
+        nudge = NUDGE.format(people=people(n), topic=ask)
+    else:
+        # same topic, one level deeper
+        if not T["follows"]:
+            T["follows"] = FOLLOWS[:]
+            random.shuffle(T["follows"])
+        label = T["topic"][0]
+        nudge = FOLLOW.format(people=people(n), label=label, follow=T["follows"].pop())
     # the opening, then the last few turns (when older turns drop out, the opening stands in for their nudge)
     msgs = [{"role": "user", "content": T["opening"]}]
-    for k, (nudge, reply) in enumerate(T["turns"][-KEEP_TURNS:]):
+    for k, (asked, reply) in enumerate(T["turns"][-KEEP_TURNS:]):
         if k > 0:
-            msgs.append({"role": "user", "content": nudge})
+            msgs.append({"role": "user", "content": asked})
         words = reply.split()
         msgs.append({"role": "assistant", "content": reply if len(words) <= KEEP_WORDS else "… " + " ".join(words[-KEEP_WORDS:])})
-    msgs.append({"role": "user", "content": NUDGE.format(people=people(n), topic=ask)})
+    msgs.append({"role": "user", "content": nudge})
     return msgs, label
 
 
