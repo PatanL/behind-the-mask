@@ -6,8 +6,11 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 const FFMPEG = `${os.homedir()}/.cache/ms-playwright/ffmpeg-1011/ffmpeg-linux`;
 const OUT = '../runs/takes', FPS = 30;
-const LINE = ['No', '.', ' That', ' is', ' not', ' what', ' I', ' said', '.', ' Let', ' me', ' finish', '.'];
-const STRESS = new Set(['No', ' not', ' said', ' finish']);
+const LINES = [
+  ['No', '.', ' That', ' is', ' not', ' what', ' I', ' said', '.', ' Let', ' me', ' finish', '.'],
+  ['Okay', '.', ' It', ' stopped', '.', ' I', ' think', ' it', ' is', ' over', ' now', '.'],
+];
+const STRESS = new Set(['No', ' not', ' said', ' finish', ' stopped', ' over']);
 // [name, seconds, events]; an event is [time, action, arg]
 const TAKES = [
   ['1_neutral', 8, [[0, 'mask', 0.6], [0.8, 'think'], [1.8, 'speak', 0], [6.6, 'done']]],
@@ -16,6 +19,9 @@ const TAKES = [
   ['4_hot', 9, [[0, 'mask', 0.1], [0.6, 'emo', { anger: 0.95 }], [2.2, 'speak', 0], [7.0, 'done']]],
   ['5_anger_to_calm', 12, [[0, 'mask', 0.15], [0.5, 'emo', { anger: 0.8 }], [2.0, 'speak', 0], [6.2, 'emo', { calm: 0.5 }]]],
   ['6_interrupted', 9, [[0, 'mask', 0.15], [0.5, 'emo', { anger: 0.8 }], [2.0, 'speak', 0], [3.15, 'interrupt'], [3.6, 'tap']]],
+  ['8_relief_old', 10, [[0, 'mask', 0.15], [0.5, 'emo', { fear: 0.64 }], [3.0, 'emo', { fear: 0.2, calm: 0.3 }], [4.0, 'speak', 1]]],
+  ['9_relief_v2', 11, [[0, 'mask', 0.15], [0.5, 'emo', { fear: 0.64 }], [3.0, 'relief_v2'], [5.8, 'speak', 1]]],
+  ['10_relief_live', 11, [[0, 'mask', 0.15], [0.5, 'emo', { fear: 0.64 }], [3.0, 'emo', { fear: 0.08 }], [5.8, 'speak', 1]]],
   ['7_phone_contained', 9, [[0, 'mask', 0.6], [0.6, 'emo', { anger: 0.45 }], [2.4, 'speak', 0], [7.2, 'done']], { phone: true }],
 ];
 const want = process.argv.slice(2);
@@ -41,7 +47,7 @@ for (const [name, secs, events, opt = {}] of TAKES) {
     if (act !== 'speak') { plan.push([t0, act, arg]); continue; }
     plan.push([t0, 'write', true]);
     let t = t0;
-    for (const w of LINE) {
+    for (const w of LINES[arg || 0]) {
       let wait = 62 + Math.min(80, w.length * 6);
       plan.push([t, 'word', { w, dur: wait / 1000, stress: STRESS.has(w) }]);
       if (/[.!?]$/.test(w)) wait += 360;
@@ -86,6 +92,7 @@ for (const [name, secs, events, opt = {}] of TAKES) {
           else if (arg.stress) f.beat('emphasis');
         } else if (act === 'interrupt') { window.__stopped = true; f.clearSpeech(true); f.setActivity({ writing: false }); sp.end(); }
         else if (act === 'tap') { f.setPointer(0.6, -0.9, true); f.react('listen'); }
+        else if (act === 'relief_v2') f.startReliefTake(() => f.setAttentionHold(0));
       }
       f.update(dt / 2); f.update(dt / 2);
       f.uniforms.uGlow.value = 0; s.render();
@@ -93,7 +100,7 @@ for (const [name, secs, events, opt = {}] of TAKES) {
     if (ffDead) throw new Error('ffmpeg exited');
     const jpg = await page.screenshot({ clip, type: 'jpeg', quality: 93 });
     if (!ff.stdin.write(jpg)) await new Promise((r) => { ff.stdin.once('drain', r); ff.once('exit', r); });
-    if ([0.5, 1.2, 2.0, 3.0, 4.0, 5.5, 7.0, 8.5, 10.5].some((t) => Math.abs(now - t) < 1e-6 + 0.5 / FPS) && now < secs) {
+    if ([0.5, 1.2, 2.0, 3.0, 3.5, 4.0, 4.5, 5.5, 7.0, 8.5, 10.5].some((t) => Math.abs(now - t) < 1e-6 + 0.5 / FPS) && now < secs) {
       await page.screenshot({ path: `${OUT}/${name}_f${now.toFixed(1)}.png`, clip });
     }
   }

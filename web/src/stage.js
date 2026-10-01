@@ -23,6 +23,8 @@ export class Stage {
     this.camera.lookAt(this.lookAt);
     this.face = new AndroidFace(this.scene, `${import.meta.env.BASE_URL}face/android.glb`, { camera: this.camera, seed: 11, textTarget: { x: 0, y: -0.8 } });
     this.lights = createFaceStage(r, this.scene, { target: this.face.root, envIntensity: 0.45 });
+    // the rounded folds at twice their lab depth: under this lighting, at exhibit size, the brow gathering needs it
+    this.face.ready.then(() => this.face.setFaceDetail({ wrinkles: 2 })).catch(() => {});
     this.lights.key.intensity = 7.5;   // the stage defaults blow the porcelain out under our tone mapping
     this.lights.key.shadow.mapSize.set(4096, 4096);
     r.setClearColor(0x04050b, 1);   // the page's background: the frameless canvas melts into it

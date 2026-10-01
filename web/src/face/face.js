@@ -15,6 +15,8 @@
 // Life layer: micro-expressions, blinks, saccades + fixation jitter, breathing, head noise / posture,
 // silent mouthing while writing, per-side asymmetry. Everything random comes from a seeded PRNG.
 import * as THREE from 'three';
+import { NATURAL_FOLDS_GLSL, CORRECTIVE_GLSL } from './natural-folds.js';
+import { reliefSample } from '../acting/relief-take.js';
 import { SpeechMotion, composeSpeech } from './speech-motion.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
@@ -292,6 +294,8 @@ float seamDist(vec2 uv) { return seamField(vObjPos); }
 // uAU2 = (lip corner puller AU12, upper lip raiser AU10, nose wrinkler AU9, lid tightener AU7). Returns 0..~1.
 uniform vec4 uAU;
 uniform vec4 uAU2;
+uniform vec4 uAU3; // lip press, chin raiser, eye widen, mouth stretch
+uniform vec2 uDetail; // corrective geometry gain, dynamic wrinkle gain
 uniform float uCreaseDepth;
 float groove(float d, float w) { float x = d / w; return exp(-x * x); }
 float creaseH(vec3 P) {
@@ -321,6 +325,24 @@ float creaseH(vec3 P) {
   if (s9 > 0.01 && y > 0.012 && y < 0.04) {
     h += s9 * 0.8 * groove(segD(vec2(ax, y), vec2(0.004, 0.030), vec2(0.012, 0.022)), 0.0010);
   }
+  // AU7/AU6: a lower-lid compression fold. This is strongest during squint/cheek support, not eye widening.
+  float lid = clamp(0.75 * uAU2.w + 0.5 * uAU.w, 0.0, 1.0);
+  if (lid > 0.01 && ax > 0.010 && ax < 0.055 && y > 0.018 && y < 0.036) {
+    float e = ellD(vec2(ax, y), vec2(0.0312, 0.0350), vec2(0.0230, 0.0122));
+    h += lid * 0.55 * groove(e, 0.00085);
+  }
+  // AU17/AU24: chin pad bunching and the fold immediately under the lower lip.
+  float chin = clamp(0.55 * uAU3.x + 0.9 * uAU3.y, 0.0, 1.0);
+  if (chin > 0.01 && y < -0.040 && y > -0.073 && ax < 0.034) {
+    float arc = ellD(vec2(ax, y), vec2(0.0, -0.052), vec2(0.025, 0.010));
+    h += chin * 0.7 * groove(arc, 0.00115);
+  }
+  // AU20: lateral mouth tension creates short diagonal folds toward the corners.
+  float stretch = uAU3.w;
+  if (stretch > 0.01 && y < -0.018 && y > -0.052 && ax > 0.020 && ax < 0.052) {
+    float d = segD(vec2(ax, y), vec2(0.028, -0.031), vec2(0.046, -0.024));
+    h += stretch * 0.42 * groove(d, 0.0011);
+  }
   // AU6 (+ AU7): crow's feet fanning from the outer eye corner
   float c = clamp(uAU.w + 0.4 * uAU2.w, 0.0, 1.0);
   if (c > 0.01 && ax > 0.05 && ax < 0.07 && y > 0.018 && y < 0.054) {
@@ -330,7 +352,7 @@ float creaseH(vec3 P) {
     r = min(r, segD(q, o + vec2(0.0025, -0.0025), o + vec2(0.0100, -0.0075)));
     h += c * 0.85 * groove(r, 0.0009);
   }
-  return h;
+  return h * uDetail.y;
 }
 float seamH(vec2 uv) {
   float x = seamField(vObjPos) / uSeamWidth;
@@ -421,6 +443,9 @@ export class AndroidFace {
     this.emoRiseT = Object.fromEntries(EMOTIONS.map((e) => [e, -10]));
     this.intensity = 1;
     this.duchenne = null;
+    this.manualChannels = {};
+    this.motionStyle = { amplitude: 1, posture: 1 };
+    this.externalIntent = { x: 0, v: 0, target: 0 };
     this.writing = false;
     this.writingAmt = { x: 0, v: 0 };
 
@@ -503,7 +528,10 @@ export class AndroidFace {
       uSSS: { value: new THREE.Color(1.0, 0.62, 0.45).multiplyScalar(0.55) }, uWrap: { value: 0.45 },
       uFade: { value: new THREE.Vector2(-0.100, -0.165) },
       uBreath: { value: 0 },
-      uAU: { value: new THREE.Vector4() }, uAU2: { value: new THREE.Vector4() }, uCreaseDepth: { value: 0.00032 },
+      uNaturalFolds: { value: 1 }, uFoldLeft: { value: new THREE.Vector4() },
+      uFoldRight: { value: new THREE.Vector4() }, uFoldEye: { value: new THREE.Vector4() },
+      uAU: { value: new THREE.Vector4() }, uAU2: { value: new THREE.Vector4() }, uAU3: { value: new THREE.Vector4() },
+      uDetail: { value: new THREE.Vector2(1, 1) }, uCreaseDepth: { value: 0.00032 },
     };
 
     model.traverse((o) => {
@@ -587,28 +615,14 @@ export class AndroidFace {
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec2 vSeamUv;\nvarying vec3 vObjPos;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeamUv = uv;\nvObjPos = position;')
-        .replace('#include <common>', '#include <common>\nuniform float uBreath;\nuniform vec4 uAU;')
+        .replace('#include <common>', '#include <common>\nuniform float uBreath;\nuniform vec4 uAU;\nuniform vec4 uAU2;\nuniform vec4 uAU3;\nuniform vec2 uDetail;')
+        .replace('uniform vec2 uDetail;', 'uniform vec2 uDetail;\n' + CORRECTIVE_GLSL)
+        .replace('#include <morphnormal_vertex>', `#include <morphnormal_vertex>
+          if (uNaturalFolds > 0.5) objectNormal = labCorrectiveNormal(position,objectNormal);`)
         .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
-          { // breathing: the upper chest and shoulders rise and open on the inhale (bind space, before skinning)
-            float chest = smoothstep(-0.100, -0.150, position.y);
-            float shoulder = smoothstep(0.040, 0.105, abs(position.x));
-            transformed.y += uBreath * chest * (0.0016 + 0.0034 * shoulder);
-            transformed.z += uBreath * chest * 0.0022 * (1.0 - shoulder) * smoothstep(-0.03, 0.03, position.z);
-            transformed.x += uBreath * chest * shoulder * sign(position.x) * 0.0007;
-          }
-          { // the brow lowerer (AU4): the inner brows pull down and in and bunch forward. The ICT morph alone
-            // barely moves this featureless forehead, so the porcelain needs the help to read as a frown.
-            float ax = abs(position.x);
-            float front = smoothstep(0.072, 0.094, position.z);
-            float wy = exp(-pow((position.y - 0.056) / 0.013, 2.0));
-            float inner = smoothstep(0.052, 0.014, ax) * smoothstep(0.0, 0.007, ax);
-            float k = uAU.x * front * wy;
-            transformed.x -= sign(position.x) * k * inner * 0.0024;
-            transformed.y -= k * (0.0014 + 0.0012 * inner);
-            transformed.z += k * inner * 0.0013;
-          }`);
+          transformed += labCorrective(position);`);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\n' + PORCELAIN_PARS)
+        .replace('#include <common>', '#include <common>\n' + PORCELAIN_PARS + NATURAL_FOLDS_GLSL)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float sDist = seamDist(vSeamUv);
           float sStr = uHasSeams * smoothstep(-0.02, 0.03, vObjPos.z);  // fade seams out toward the back of the head
@@ -618,11 +632,14 @@ export class AndroidFace {
           diffuseColor.rgb *= mix(1.0, uSeamDark, sCore);
           diffuseColor.rgb *= mix(1.0, 0.9, sLip);
           float cH = creaseH(vObjPos);
-          diffuseColor.rgb *= 1.0 - 0.28 * clamp(cH, 0.0, 1.0);   // creases hold a little shadow
+          // Legacy mode retained for comparison. Natural mode has NO ink/albedo stroke.
+          diffuseColor.rgb *= 1.0 - (1.0-uNaturalFolds)*0.28*clamp(cH,0.0,1.0);
         `)
         .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
           {
-            float h0 = seamH(vSeamUv) - uCreaseDepth * cH;
+            float pixelSize = max(length(dFdx(vObjPos)),length(dFdy(vObjPos)));
+            float foldH = naturalFoldHeight(vObjPos,pixelSize);
+            float h0 = seamH(vSeamUv) + mix(-uCreaseDepth*cH,foldH,uNaturalFolds);
             vec2 dH = vec2(dFdx(h0), dFdy(h0));
             normal = seamPerturb(-vViewPosition, normal, dH, faceDirection);
           }
@@ -639,7 +656,7 @@ export class AndroidFace {
           outgoingLight *= smoothstep(uFade.y, uFade.x, vObjPos.y);
           #include <opaque_fragment>`);
     };
-    m.customProgramCacheKey = () => 'porcelain-v4';
+    m.customProgramCacheKey = () => 'porcelain-natural-folds-v2';
     (this._porcelainMats ||= []).push(m);
     return m;
   }
@@ -731,13 +748,52 @@ export class AndroidFace {
    *  across the face in brief, scripted micro-expressions. Pushed off the axis, the regulation falls away. */
   setMask(v) { if (v != null && Number.isFinite(v)) this.maskTarget = clamp(v); }
 
+  /** Acting-lab controls. These are display/animation controls, not model measurements. */
+  setNaturalFolds(enabled = true) { if(this.uniforms) this.uniforms.uNaturalFolds.value = enabled ? 1 : 0; }
+  setPanelSeams(visible = true) { if(this.uniforms) this.uniforms.uHasSeams.value = visible ? 1 : 0; }
+  cancelReliefTake() {
+    if(!this.reliefTake) return;
+    this.reliefTake=null;
+    const B=this.breath; B.kind='rest'; B.sigh=B.relief=false;
+    B.from=B.val; B.phase=0; B.T=4.5; B.inhale=.38; B.hold=0; B.depth=Math.max(.8,B.val);
+    B.gasp=B.huff=B.speechInhale=false;
+  }
+  /** drive: the take also sets the feelings (rehearsal); false = only the release itself (live: the feelings keep
+   *  coming from the model's readout). */
+  startReliefTake(onComplete, { drive = true } = {}) {
+    this.reliefTake = { start:this.time, fear:this.felt?.fear || this.emoTarget.fear || .64,
+      breath:this.breath.val, onComplete, sample:null, drive };
+    this.breath.gasp=this.breath.huff=this.breath.speechInhale=false;
+    this.overlays=this.overlays.filter(o=>!o.social);
+    this.overlays.push({t0:this.time+.25,a:.65,h:.7,r:2.1,head:{pitch:-.85,z:.001}});
+    this.setAttentionHold(.7);
+  }
+  setManualChannels(values = {}) {
+    this.manualChannels = Object.fromEntries(Object.entries(values).filter(([,v]) => Number.isFinite(v)).map(([k,v]) => [k, clamp(v, -1, 1)]));
+  }
+  setMotionStyle({ amplitude, posture } = {}) {
+    if (Number.isFinite(amplitude)) this.motionStyle.amplitude = clamp(amplitude, 0, 1.5);
+    if (Number.isFinite(posture)) this.motionStyle.posture = clamp(posture, 0, 1.5);
+  }
+  setAttentionHold(v = 0) { this.externalIntent.target = clamp(v); }
+  setFaceDetail({ correctives, wrinkles } = {}) {
+    if (!this.uniforms) return;
+    if (Number.isFinite(correctives)) this.uniforms.uDetail.value.x = clamp(correctives, 0, 1.5);
+    if (Number.isFinite(wrinkles)) this.uniforms.uDetail.value.y = clamp(wrinkles, 0, 1.5);
+  }
+  setPorcelainMatte(on = false) {
+    for (const m of this._porcelainMats || []) {
+      m.roughness = on ? 0.68 : 0.4; m.clearcoat = on ? 0.12 : 1.0; m.clearcoatRoughness = on ? 0.45 : 0.075; m.needsUpdate = true;
+    }
+  }
+
   /** Drop every transient reaction (beats, leaks, chuckles, onset surges, tremors, special breaths), e.g. when a
    *  performance is cut off. The felt emotion itself is left to setEmotion. */
   clearReactions() {
     this.clearSpeech(true);
     const t = this.time;
     this.lastBeat = -Infinity; this.lastReaction = Object.create(null);
-    this.reliefT = -10; this.ovBreath = 0;
+    this.reliefT = -10; this.ovBreath = 0; this.reliefTake = null; this.lastReliefSample = null; this.externalIntent.target = 0;
     this.overlays = []; this.micro = null; this.lastLeak = null;
     this.perf = null; this.intent.x = 0; this.intent.v = 0;
     for (const e of EMOTIONS) { this.surge[e].amp = 0; this.emoBase[e].x = this.emo[e].x; this.emoBase[e].v = 0; }
@@ -964,12 +1020,12 @@ export class AndroidFace {
     }
   }
 
-  /** A negative feeling draining away: a sigh of relief, lids softening, the hint of a smile. */
+  /** A negative feeling draining away: a visible release -- the breath goes out first, the eyes close softly and
+   *  reopen, and only then a small smile (acting/relief-take.js, on the face's own clock so a slow frame can't skip
+   *  it). Live, the feelings themselves keep coming from the readout. */
   _relief() {
-    const t = this.time;
-    this.breath.relief = true;
-    this.breath.nextSigh = Math.min(this.breath.nextSigh, t);
-    this.overlays.push({ t0: t + 0.7, a: 0.6, h: 0.8, r: 1.4, ch: { mouthSmile: 0.1, eyeBlink: 0.14 }, head: { pitch: -1.6 } });
+    if (this.reliefTake) return;
+    this.startReliefTake(() => this.setAttentionHold(0), { drive: false });
   }
 
   /** Visitor's pointer in the canvas' NDC (may be outside [-1,1]); press = a click/tap. */
@@ -999,6 +1055,12 @@ export class AndroidFace {
     const t = this.time;
     const idle = this.options.idle;
 
+    // New relief take owns its release/breath until it completes or is interrupted.
+    if(this.reliefTake) {
+      const R=this.reliefTake; R.sample=reliefSample(t-R.start,R.fear,R.breath);
+      this.lastReliefSample=R.sample;
+      if (R.drive) this.setEmotion({fear:R.sample.fear,calm:R.sample.calm,joy:R.sample.joy});
+    }
     // ---- emotions: felt state follows target (fast rise, slower decay), surprise habituates
     spring(this.maskS, this.maskTarget, 1.6, dt);
     const felt = {};
@@ -1025,12 +1087,13 @@ export class AndroidFace {
       this.emoPrev[e] = target;
     }
     this.felt = felt;
+    spring(this.externalIntent, this.externalIntent.target, this.externalIntent.target > this.externalIntent.x ? 5.5 : 2.0, dt);
     this._direct(dt, t, felt);
     // display rules: how much the trained persona is holding the face (see setMask)
     const neg = Math.max(felt.sadness, felt.anger, felt.fear, felt.disgust);
     const R = this.reg = smooth(0.2, 0.5, this.maskS.x) * smooth(0.04, 0.25, neg);
     // Keep one coherent onset gesture; continuous blended expression is unchanged.
-    for (const [e, rise] of onsets.sort((a,b) => b[1]-a[1]).slice(0, 1)) {
+    for (const [e, rise] of (this.reliefTake ? [] : onsets.sort((a,b) => b[1]-a[1]).slice(0, 1))) {
       if (e === 'relief') this._relief();
       else {
         this._onset(e, rise);
@@ -1059,6 +1122,8 @@ export class AndroidFace {
       }
     };
     for (const e of EMOTIONS) if (felt[e] > 1e-3) applyProto(e, felt[e]);
+    // Lab/manual local control is additive and channel-level, so artists can diagnose the rig without inventing a new emotion label.
+    for (const [ch, v] of Object.entries(this.manualChannels)) route(ch, v, tgt);
 
     // blends: each region carried by one of the two feelings
     let blendName = null, blendK = 0;
@@ -1087,7 +1152,7 @@ export class AndroidFace {
       else { add('mouthSmileL', 0.07 * R); add('mouthSmileR', 0.05 * R); }                                       // a polite smile
     }
     const post = {};   // fast components added after the muscle springs (micro-expressions, tremors, gasps)
-    if (idle && this.options.micro && R > 0.2 && neg > 0.12) {
+    if (idle && this.options.micro && !this.reliefTake && R > 0.2 && neg > 0.12) {
       if (t >= this.leakNext) {
         const [e, v] = this._dominant(NEG);
         if (!this.micro || t - this.micro.t0 > 1) this._leak(e, clamp(0.45 + 0.6 * v, 0, 1), true);
@@ -1193,6 +1258,12 @@ export class AndroidFace {
       v = v <= 0 ? 0 : cap * (1 - Math.exp(-v / cap * 1.25)) / (1 - Math.exp(-1.25));   // soft cap, ~linear at small v
       this.out[c] = Math.min(v, cap);
     }
+    // A directed eye closure must not fight the fear eye-widen morph.
+    // Only the new relief take uses this ownership rule; other takes are unchanged.
+    if(this.reliefTake?.sample) {
+      const close=smooth(0,.5,this.reliefTake.sample.eyeClose);
+      this.out.eyeWideLeft*=1-close; this.out.eyeWideRight*=1-close;
+    }
     composeSpeech(this.out, this.speechFrame, this.speechGain);
     // blink composes with the lid state: closes whatever is open
     for (const [side, k] of [['Left', 1], ['Right', 0.97]]) {
@@ -1218,6 +1289,10 @@ export class AndroidFace {
       const o = this.out, av = (k) => ((o[k + 'Left'] || 0) + (o[k + 'Right'] || 0)) / 2;
       this.uniforms.uAU.value.set(av('browDown'), av('browInnerUp'), av('browOuterUp'), av('cheekSquint'));
       this.uniforms.uAU2.value.set(av('mouthSmile'), av('mouthUpperUp'), av('noseSneer'), av('eyeSquint'));
+      this.uniforms.uAU3.value.set(av('mouthPress'), av('mouthShrugLower'), av('eyeWide'), av('mouthStretch'));
+      this.uniforms.uFoldLeft.value.set(o.browDownLeft||0,o.browInnerUpLeft||0,o.browOuterUpLeft||0,o.cheekSquintLeft||0);
+      this.uniforms.uFoldRight.value.set(o.browDownRight||0,o.browInnerUpRight||0,o.browOuterUpRight||0,o.cheekSquintRight||0);
+      this.uniforms.uFoldEye.value.set(o.eyeSquintLeft||0,o.eyeSquintRight||0,o.eyeWideLeft||0,o.eyeWideRight||0);
     }
 
     // ---- apply morphs
@@ -1227,11 +1302,29 @@ export class AndroidFace {
       const inf = m.morphTargetInfluences;
       for (const [name, i] of m.userData.map) inf[i] = outMap[name] || 0;
     }
+    if(this.reliefTake?.sample?.done) {
+      const callback=this.reliefTake.onComplete; this.reliefTake=null;
+      const B=this.breath; B.kind='rest'; B.sigh=false; B.relief=false;
+      B.from=B.val; B.depth=Math.max(.14,B.val); B.phase=.80; B.T=4.5; B.inhale=.38; B.hold=0;
+      if(typeof callback==='function') callback();
+    }
   }
 
   _breathe(dt, t, add, post) {
     const B = this.breath, f = this.felt || {};
     if (!this.options.breathing) { B.val = 0; this.uniforms && (this.uniforms.uBreath.value = 0); return; }
+    if (this.reliefTake?.sample) {
+      const S=this.reliefTake.sample,prev=B.val;
+      B.kind='directed-relief'; B.relief=true; B.sigh=false;
+      B.val=S.breath; B.vel=(B.val-prev)/Math.max(dt,.001);
+      B.gasp=B.huff=B.speechInhale=false;
+      this.breathVal=B.val; if(this.uniforms) this.uniforms.uBreath.value=B.val;
+      route('eyeBlink',S.eyeClose,post);
+      add('mouthFunnel',S.exhaleMouth); add('jawOpen',S.exhaleMouth*.32);
+      add('mouthSmileL',S.smile); add('mouthSmileR',S.smile*.78);
+      add('cheekSquint',S.cheek);
+      return;
+    }
     const ar = this.arousal || 0;
     const sad = f.sadness || 0, fear = f.fear || 0, anger = f.anger || 0;
     // kinds: rest | sigh | speech | gasp (startle: sharp in-breath, held) | huff (anger: held, then forced out
@@ -1406,7 +1499,7 @@ export class AndroidFace {
 
     // glances down at the text while writing
     const G = this.glance;
-    const held = this.intent.x > 0.3;
+    const held = Math.max(this.intent.x, this.externalIntent.x) > 0.3;
     if (idle && W > 0.5 && this.gazeMode === 'camera' && !held) {
       if (!G.active && t >= G.next) { G.active = true; G.until = t + 0.6 + 1.4 * this.rand(); }
       if (G.active && t >= G.until) { G.active = false; G.next = t + 1.8 + 3.5 * this.rand(); }
@@ -1525,7 +1618,7 @@ export class AndroidFace {
     let breathP = 0, breathY = 0;
     if (idle) {
       const slow = 1 - 0.45 * f.calm;
-      const amp = (0.7 + 0.8 * Math.max(0, this.arousal) + 0.3 * f.curiosity) * (1 - 0.4 * f.calm) * (1 - 0.75 * this.intent.x);
+      const amp = (0.7 + 0.8 * Math.max(0, this.arousal) + 0.3 * f.curiosity) * (1 - 0.4 * f.calm) * (1 - 0.75 * Math.max(this.intent.x, this.externalIntent.x)) * this.motionStyle.amplitude;
       pitch += amp * 1.1 * this.noise.fbm(t * 0.21 * slow + 100, 3);
       yaw += amp * 1.4 * this.noise.fbm(t * 0.17 * slow + 200, 3);
       roll += amp * 0.8 * this.noise.fbm(t * 0.19 * slow + 300, 3);
@@ -1543,7 +1636,7 @@ export class AndroidFace {
     const PS = this.posture;
     if (idle && t >= PS.next) {
       PS.next = t + 8 + 12 * this.rand();
-      PS.target = [(this.rand() - 0.5) * 3.2, (this.rand() - 0.5) * 4.5, (this.rand() - 0.5) * 4.0];
+      const pm = this.motionStyle.posture; PS.target = [(this.rand() - 0.5) * 3.2 * pm, (this.rand() - 0.5) * 4.5 * pm, (this.rand() - 0.5) * 4.0 * pm];
     }
     const drift = idle && this.intent.x < 0.3;
     spring(PS.cur.p, drift ? PS.target[0] : 0, 0.9, dt);

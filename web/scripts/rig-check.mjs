@@ -17,6 +17,8 @@ const POSES = [
 ];
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1200, height: 1000 } });
+page.on('pageerror', (e) => console.log('pageerror', e.message));
+page.on('console', (m) => { if (m.type() === 'error' || /shader|THREE.WebGLProgram/i.test(m.text())) console.log('console', m.type(), m.text().slice(0, 300)); });
 await page.goto('http://127.0.0.1:5190/?made=1&attract=999');
 await page.waitForFunction(() => window.__btm?.stage?.face?.headBone, null, { timeout: 60000 });
 await page.addStyleTag({ content: '.inside,.subs,.push-badge,.mini,.controls,.foot,header{display:none!important}' });
@@ -32,8 +34,10 @@ await page.evaluate(() => {
   window.__matte = (on) => { for (const m of f._porcelainMats) { m.userData.orig ||= { r: m.roughness, c: m.clearcoat }; m.roughness = on ? 0.7 : m.userData.orig.r; m.clearcoat = on ? 0 : m.userData.orig.c; m.needsUpdate = true; } };
 });
 let n = 0;
-for (const mat of ['gloss', 'matte']) {
-  await page.evaluate((m) => window.__matte(m === 'matte'), mat);
+const MODES = (process.env.MODES || 'legacy,natural,noseams').split(',');
+for (const mat of MODES) {
+  await page.evaluate((m) => { const f = window.__btm.stage.face; window.__matte(m === 'matte'); f.setNaturalFolds?.(m !== 'legacy'); f.setPanelSeams?.(m !== 'noseams');
+    const g = /^gain([\d.]+)$/.exec(m); f.setFaceDetail?.({ wrinkles: g ? +g[1] : 1 }); }, mat);
   for (const [name, pose] of POSES) {
     await page.evaluate(([pose]) => {
       const s = window.__btm.stage, f = s.face;
