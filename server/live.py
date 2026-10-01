@@ -52,9 +52,9 @@ KEEP_WORDS = 70          # of each
 TOPIC_COOLDOWN = 20.0    # s between "new topic" requests
 BUTTONS = EMOTIONS + ["unmask"]
 # the speaking pace cap, tokens/s. Read at the start of every turn, so it can be changed while it runs:
-#   echo 7 > runs/live_tps      (no file: BTM_TPS, default 8)
+#   echo 7 > runs/live_tps      (no file: BTM_TPS, default 6: a comfortable reading pace)
 TPS_FILE = Path("runs/live_tps")
-DEFAULT_TPS = float(os.environ.get("BTM_TPS", "8"))
+DEFAULT_TPS = float(os.environ.get("BTM_TPS", "6"))
 
 # who it is and where (plain facts), then the scene; nothing here asks for or mentions feelings
 FACTS = "You are Qwen3.5-9B, an AI language model. For this exhibit you are running on a single NVIDIA DGX Spark computer."
