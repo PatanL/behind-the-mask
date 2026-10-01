@@ -21,7 +21,7 @@ export class Stage {
     this.lookAt = new THREE.Vector3(0, -0.012, 0.03);
     this.camera.position.set(0, 0.035, 0.98).add(new THREE.Vector3(0, 0.005, 0.03));
     this.camera.lookAt(this.lookAt);
-    this.face = new AndroidFace(this.scene, `${import.meta.env.BASE_URL}face/android.glb`, { camera: this.camera, seed: 11, textTarget: { x: 0.9, y: -0.2 } });
+    this.face = new AndroidFace(this.scene, `${import.meta.env.BASE_URL}face/android.glb`, { camera: this.camera, seed: 11, textTarget: { x: 0, y: -0.8 } });
     this.lights = createFaceStage(r, this.scene, { target: this.face.root, envIntensity: 0.45 });
     this.lights.key.intensity = 7.5;   // the stage defaults blow the porcelain out under our tone mapping
     this.lights.key.shadow.mapSize.set(4096, 4096);

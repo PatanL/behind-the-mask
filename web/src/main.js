@@ -454,7 +454,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const ls = params.get('autoplay') || params.get('made') ? null : await liveStatus();
   $('#mode-live').hidden = !ls;
   if (ls) setMode('live');
-  else { setMode('made'); stage.ready.then(() => setTimeout(() => play({ fast: !!params.get('fast') }), 600)).catch(() => {}); }
+  else { setMode('made'); if (!params.get('rehearsal')) stage.ready.then(() => setTimeout(() => play({ fast: !!params.get('fast') }), 600)).catch(() => {}); }
   setInterval(async () => { const s = await liveStatus(); $('#mode-live').hidden = !s; $('#mode-live-n').textContent = s?.viewers ? `· ${s.viewers}` : ''; }, 15000);
-  window.__btm = { state, play, stage, THREE };
+  window.__btm = { state, play, stage, speech, THREE };
 })();

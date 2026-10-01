@@ -9,7 +9,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
-await page.goto('http://127.0.0.1:5190/?attract=999');
+await page.goto('http://127.0.0.1:5190/?made=1&rehearsal=1&attract=999');
 await page.waitForFunction(() => window.__btm?.stage?.face?.headBone, null, { timeout: 60000 });
 await page.waitForTimeout(2500);
 const box = await page.evaluate(() => { const r = document.querySelector('#face-canvas').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });

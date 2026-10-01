@@ -1,4 +1,4 @@
-// Live mode, end to end: two visitors open ?live=1; one holds Joy, then Sadness; the other taps Fear.
+// Live mode, end to end: two visitors on the live AI; one holds Joy, then Sadness; the other taps Fear; then New topic.
 // Screenshots of visitor A to ../runs/live_*.png.   URL=http://127.0.0.1:5190 node scripts/live-qa.mjs
 import { chromium } from 'playwright';
 const URL0 = (process.env.URL || 'http://127.0.0.1:5190') + '/?live=1&attract=999' + (process.env.Q ? '&' + process.env.Q : '');
@@ -25,15 +25,16 @@ await shot('1_joy_fear');
 await A.waitForTimeout(2500); await shot('2_after');
 await hold(A, 'sadness', 6000);
 await shot('3_sadness');
-const pushed = await A.evaluate(() => ({ toks: document.querySelectorAll('#speech .tok').length, viewers: document.querySelector('#crowd-viewers').textContent, power: document.querySelector('#crowd-power').textContent, caption: document.querySelector('#caption').textContent }));
+const pushed = await A.evaluate(() => ({ toks: document.querySelectorAll('#speech .tok').length, viewers: document.querySelector('#crowd-viewers').textContent, power: document.querySelector('#crowd-power').textContent, label: document.querySelector('#speech-label').textContent, buttonsTop: Math.round(document.querySelector('#live-buttons').getBoundingClientRect().top) }));
 console.log(pushed);
-// wait for the end of the story and the "nobody pushed" card
-await A.waitForSelector('#live-plain:not([hidden])', { timeout: 120000 }).catch(() => console.log('no end card'));
-await A.waitForTimeout(800);
-await shot('4_end');
+// a new topic: it finishes the sentence, then moves on (the subtitles carry on in the same box)
+await A.click('#new-topic');
+await A.waitForTimeout(9000);
+await shot('4_new_topic');
+console.log(await A.evaluate(() => ({ label: document.querySelector('#speech-label').textContent, buttonsTop: Math.round(document.querySelector('#live-buttons').getBoundingClientRect().top) })));
 await A.screenshot({ path: `../runs/live_${tag}_full.png`, fullPage: true });
 // a word from the live story: the decision inspector
-const tok = A.locator('#speech .tok.pushed').first();
+const tok = A.locator('#speech .tok.pushed:not(.old)').last();
 if (await tok.count()) { await tok.click(); await A.waitForTimeout(400); await shot('5_inspect'); }
 console.log('errors:', errs.length ? errs : 'none');
 await browser.close();

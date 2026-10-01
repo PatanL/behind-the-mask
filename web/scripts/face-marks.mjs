@@ -1,11 +1,11 @@
 import { chromium } from 'playwright';
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 600, height: 600 } });
-await page.goto('http://127.0.0.1:5190/?attract=999');
+await page.goto('http://127.0.0.1:5190/?made=1&attract=999');
 await page.waitForFunction(() => window.__btm?.stage?.face?.headBone, null, { timeout: 60000 });
 console.log(await page.evaluate(() => {
   const { stage, THREE } = window.__btm; const f = stage.face; const out = [];
-  let skin = null; f.root.traverse((o) => { if (o.name === 'Skin_1') skin = o; });
+  const skin = f.morphMeshes.reduce((m, o) => (!m || o.geometry.attributes.position.count > m.geometry.attributes.position.count ? o : m), null);
   const P = skin.geometry.attributes.position; const v = new THREE.Vector3();
   let nose = null, chin = null, top = null; const bb = new THREE.Box3().setFromBufferAttribute(P);
   // mouth: vertices near x=0 in front with a gap: find the lip line as the y of the maximum z-dip near x=0 below the nose
