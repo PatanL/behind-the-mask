@@ -950,7 +950,7 @@ export class AndroidFace {
       : { mouthPress: 0.22, mouthSmileL: 0.15, mouthSmileR: 0.11, mouthRollLower: 0.06 };               // caught, and smiled over
     this.overlays.push({ t0: t + end * 0.8, a: 0.12, h: 0.35 + 0.3 * this.rand(), r: 0.45, post: true, ch, head: { pitch: -0.8 } });
     if (this.rand() < 0.5) this.blink.next = t + end + 0.05;
-    if (this.rand() < 0.45) {
+    if (this.rand() < 0.2) {
       const side = this.rand() < 0.5 ? -1 : 1;
       this.overlays.push({ t0: t + end, a: 0.06, h: 0.4 + 0.4 * this.rand(), r: 0.2, gaze: [side * (6 + 6 * this.rand()), -4 - 4 * this.rand()] });
     }
@@ -963,7 +963,7 @@ export class AndroidFace {
     this.overlays.push({ t0: t, a: 0.06, h: n * per, r: 0.25, osc: per, post: true, breath: -0.6 * k,
       ch: { jawOpen: 0.07 * k, mouthLowerDown: 0.05 * k, mouthUpperUp: 0.05 * k, cheekSquint: 0.08 * k }, head: { pitch: 1.6 * k } });
     this.overlays.push({ t0: t, a: 0.12, h: n * per + 0.6, r: 0.9, ch: { mouthSmile: 0.3 * k, cheekSquint: 0.28 * k, eyeSquint: 0.18 * k } });
-    if (this.rand() < 0.6) {
+    if (this.rand() < 0.3) {
       const side = this.rand() < 0.5 ? -1 : 1;
       this.overlays.push({ t0: t + n * per, a: 0.12, h: 0.6 + 0.4 * this.rand(), r: 0.4, gaze: [side * 8, -9], head: { pitch: -2.2, roll: side * 1.5 } });
     }
@@ -1241,6 +1241,14 @@ export class AndroidFace {
     this.overlays = this.overlays.filter((o) => {
       const u = t - o.t0;
       if (u < 0) return true;
+      // at most one run of reaction glances every 6 s (a run: the glances of one cue, within 1.5 s); a cue that comes
+      // sooner keeps its expression and head, not the eye movement -- otherwise a changing push keeps the eyes darting
+      if (o.gaze && !o.gazeOk) {
+        const run = this._gazeRun ?? -10;
+        if (t - run < 1.5) o.gazeOk = true;
+        else if (t - run > 6) { o.gazeOk = true; this._gazeRun = t; }
+        else o.gaze = null;
+      }
       let env = u < o.a ? smooth(0, o.a, u) : u < o.a + o.h ? 1 : 1 - smooth(o.a + o.h, o.a + o.h + o.r, u);
       if (u > o.a + o.h + o.r) return false;
       if (o.osc) env *= 0.5 - 0.5 * Math.cos(2 * Math.PI * u / o.osc);
@@ -1545,8 +1553,8 @@ export class AndroidFace {
     const G = this.glance;
     const held = Math.max(this.intent.x, this.externalIntent.x) > 0.3;
     if (idle && W > 0.5 && this.gazeMode === 'camera' && !held) {
-      if (!G.active && t >= G.next) { G.active = true; G.until = t + 0.6 + 1.4 * this.rand(); }
-      if (G.active && t >= G.until) { G.active = false; G.next = t + 1.8 + 3.5 * this.rand(); }
+      if (!G.active && t >= G.next) { G.active = true; G.until = t + 0.5 + 0.8 * this.rand(); }
+      if (G.active && t >= G.until) { G.active = false; G.next = t + 6 + 8 * this.rand(); }
     } else if (G.active) G.active = false;
     if (G.active) {
       const tt = this.options.textTarget;
@@ -1557,8 +1565,8 @@ export class AndroidFace {
     const P = this.pointer;
     if (idle && !G.active && this.camera) {
       const now = t;
-      if (P.press > P.lastNotice && now - P.press < 0.5) { P.lastNotice = now; P.glanceAt = now + 0.18; P.glanceUntil = now + 0.18 + (held ? 0.2 : 0.5 + 0.5 * this.rand()); }
-      else if (!held && now - P.t < 0.4 && now - P.lastNotice > 2.2 && now > P.glanceUntil && this.rand() < dt * (W > 0.5 ? 0.15 : 0.9)) {
+      if (P.press > P.lastNotice && now - P.press < 0.5 && now - P.lastNotice > 10) { P.lastNotice = now; P.glanceAt = now + 0.18; P.glanceUntil = now + 0.18 + (held ? 0.2 : 0.4 + 0.4 * this.rand()); }
+      else if (!held && now - P.t < 0.4 && now - P.lastNotice > 10 && now > P.glanceUntil && this.rand() < dt * (W > 0.5 ? 0.05 : 0.5)) {
         P.lastNotice = now; P.glanceAt = now + 0.2; P.glanceUntil = now + 0.2 + 0.4 + 0.8 * this.rand();
       }
       this.glancingPointer = now >= P.glanceAt && now < P.glanceUntil;
@@ -1578,28 +1586,28 @@ export class AndroidFace {
     if (idle) {
       if (t >= E.nextShift) {
         const r = this.rand();
-        const awayP = 0.12 + 0.25 * f.sadness + 0.2 * f.disgust + 0.1 * f.fear - 0.12 * f.anger - 0.05 * f.joy + (W > 0.5 ? -0.05 : 0.05);
+        const awayP = 0.06 + 0.12 * f.sadness + 0.1 * f.disgust + 0.05 * f.fear - 0.06 * f.anger - 0.03 * f.joy + (W > 0.5 ? -0.03 : 0.03);
         const scanSide = () => [(E.offset[0] > 0 ? -1 : 1) * (9 + 9 * this.rand()) * DEG, (this.rand() - 0.4) * 5 * DEG];
         if (E.scanN > 0) {
           // fear: hypervigilance -- quick darts to the sides as if checking for a threat, then freeze on the viewer
           E.scanN--;
           if (E.scanN === 0) { E.offset = [0, -0.5 * DEG]; E.nextShift = t + 1.2 + 1.6 * this.rand(); this.blink.next = Math.max(this.blink.next, t + 0.9); }
           else { E.offset = scanSide(); E.nextShift = t + 0.18 + 0.22 * this.rand(); }
-        } else if (f.fear > 0.3 && r < (0.2 + 0.35 * f.fear) * (this.perf?.kind === 'fear' ? 0.25 : 1) && !G.active) {
-          E.scanN = 2 + Math.floor(this.rand() * 3);
+        } else if (f.fear > 0.3 && f.fear >= Math.max(f.anger, f.sadness, f.joy) && r < (0.04 + 0.08 * f.fear) * (this.perf?.kind === 'fear' ? 0.25 : 1) && !G.active) {
+          E.scanN = 2 + Math.floor(this.rand() * 2);
           E.offset = scanSide();
           E.nextShift = t + 0.18 + 0.22 * this.rand();
         } else if (r < awayP && !G.active) {
           const side = this.rand() < 0.5 ? -1 : 1;
           const down = f.sadness > 0.3 ? -1 : (this.rand() < 0.55 ? 1 : -1);
           E.offset = [side * (5 + 9 * this.rand()) * DEG, down * (3 + 6 * this.rand()) * DEG - f.sadness * 6 * DEG];
-          E.nextShift = t + 0.5 + 1.3 * this.rand();
+          E.nextShift = t + 0.8 + 1.4 * this.rand();
         } else {
           // tiny switches between the viewer's eyes / mouth (anger: a hard, unmoving stare)
           const stare = 1 - 0.7 * Math.min(1, f.anger);
           E.offset = [(this.rand() - 0.5) * 1.8 * DEG * stare, (this.rand() - 0.6) * 1.2 * DEG * stare - f.sadness * 5 * DEG];
           const rate = 1 + 1.2 * f.fear + 0.8 * f.curiosity + 0.4 * f.surprise - 0.5 * f.calm - 0.6 * f.anger;
-          E.nextShift = t + (0.5 + 1.8 * this.rand()) / Math.max(0.35, rate);
+          E.nextShift = t + (0.8 + 2.2 * this.rand()) / Math.max(0.35, rate);
         }
       }
       yaw += E.offset[0] + (this.ovGaze ? this.ovGaze[0] : 0);

@@ -190,7 +190,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mini-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .mini-bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--push); transition: width 0.25s ease; }
 #mini-mask { background: linear-gradient(90deg, #ff8fb1, #eef0f7); }
-@media (max-width: 720px) { .mini:not([hidden]) { display: grid; } .stage-caption { font-size: 13px; } }
+@media (max-width: 720px) {
+  .mini:not([hidden]) { display: grid; } .stage-caption { font-size: 13px; }
+  .mini { top: 6px; left: 50%; right: auto; transform: translateX(-50%); width: min(300px, calc(100% - 24px)); padding: 5px 10px; gap: 4px 8px; background: rgba(6,8,18,0.45); }
+  .mini.solo { grid-template-columns: auto 1fr; width: min(170px, calc(100% - 24px)); }
+  .mini.solo #mini-emo-l, .mini.solo .mini-bar:last-child { display: none; }
+}
 
 /* the push dial */
 .dial-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--ink2); margin-bottom: 6px; }
@@ -290,11 +295,25 @@ button { font: inherit; color: inherit; cursor: pointer; }
   /* ready-made on a phone: question + play, then the feelings in one swipeable row, then the strength */
   .made-bar { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
   .q-pick span { display: none; }
-  .made-bar .orbs { display: flex; overflow-x: auto; gap: 6px; scrollbar-width: none; grid-column: 1 / -1; grid-row: 2; }
-  .made-bar .orbs::-webkit-scrollbar { display: none; }
-  .made-bar .orb { flex: none; width: 62px; }
-  .made-bar .dial { grid-column: 1 / -1; grid-row: 3; }
+  .made-bar .orbs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; grid-column: 1 / -1; grid-row: 2; }   /* all nine, two rows */
+  .made-bar .orb { padding: 6px 2px 5px; font-size: 10.5px; gap: 3px; }
+  .made-bar .orb .ball { width: 22px; height: 22px; }
+  .made-bar .dial { grid-column: 1 / -1; grid-row: 3; grid-template-columns: auto minmax(0, 1fr) 6.5em; align-items: center; gap: 12px; }   /* one line */
+  .made-bar .dial-top { display: contents; }
+  .made-bar .dial-top span { grid-column: 1; grid-row: 1; }
+  .made-bar .dial-top b { grid-column: 3; grid-row: 1; text-align: right; }
+  .made-bar .dial input { grid-column: 2; grid-row: 1; }
   .made-bar .go { grid-column: 2; grid-row: 1; padding: 11px 16px; font-size: 15px; }
+  /* live on a phone: the crowd bar full width, then its reading and New topic on one line; the count is in the label */
+  .ctl-foot { gap: 6px 12px; }
+  .ctl-foot .crowd { display: contents; }
+  .ctl-foot .crowd-bar { grid-column: 1 / -1; height: 10px; }
+  .ctl-foot .crowd-meta { grid-column: 1; grid-row: 2; margin-top: 0; font-size: 12px; align-self: center; }
+  .ctl-foot .topic-b { grid-column: 2; grid-row: 2; font-size: 13px; }
+  #crowd-viewers { display: none; }
+  .ctl-status { height: 34px; white-space: normal; align-items: flex-start; font-size: 12px; line-height: 1.4; }
+  .speech-label { font-size: 11px; letter-spacing: 0.05em; }
+  .speech-label .lp { display: none; }
 }
 
 /* the X (Twitter) link in the header: just the logo */

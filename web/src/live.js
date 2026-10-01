@@ -95,7 +95,13 @@ export function createLive(ctx) {
     setTimeout(() => { if (on && story?.id === id && !story.ended) stage.face.setActivity({ writing: true }); }, cont ? 150 : 700);
     syncDoc();
   }
-  function label() { $('#speech-label').textContent = `Live · talking about ${topic}${viewers > 1 ? ` · ${viewers} people here` : ''}${lite ? ' · a few seconds behind' : ''}`; }
+  // phones drop the words in .lp ("Live · talking about the people watching · 5 here")
+  function label() {
+    const el = $('#speech-label'), lp = (t) => Object.assign(document.createElement('span'), { className: 'lp', textContent: t });
+    el.replaceChildren(lp('Live · '), `talking about ${topic}`);
+    if (viewers > 1) el.append(` · ${viewers} `, lp('people '), 'here');
+    if (lite) el.append(' · a few seconds behind');
+  }
   const meanE = (toks, k) => (toks.length ? toks.reduce((s, t) => s + t.e[k], 0) / toks.length : 0);
   function pushAt(tok) {
     // which button dominated the push when this word was written (weights relative to each button's full strength)

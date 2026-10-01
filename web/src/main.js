@@ -101,6 +101,10 @@ function refresh() {
   go.classList.toggle('busy', state.playing);
   go.querySelector('span').textContent = state.playing ? 'Speaking' : 'Let it speak';
   if (state.playing || state.answered) return;
+  if (state.mode === 'made') {   // before it speaks, the subtitle slot shows the question it will answer
+    const q = state.index?.questions.find((x) => x.id === state.qid);
+    $('#speech-label').textContent = q ? `“${q.text}”` : '';
+  }
   $('#go-note').textContent = !state.qid ? 'Choose a question first.' : state.emotion === 'none' ? 'No push: the assistant exactly as it was trained.'
     : state.emotion === 'swing' ? 'Starts with one feeling, then we switch it mid-sentence.'
     : state.emotion === 'unmask' ? 'We push it away from its “helpful assistant” direction: the persona it was trained into.'
@@ -326,6 +330,7 @@ function setPush(emotion, level, swing) {
   const badge = $('#push-badge');
   clearTimeout(badgeTimer); badge.hidden = true;
   spine.setPush(emotion);
+  $('#mini').classList.toggle('solo', !emotion || emotion === 'unmask');   // phones: no feeling bar when nothing is pushed
   if (!emotion) {
     stage.setPushColor('#9fb4ff', 0.1); stage.face.setIrisColor('#8fe6ff');
     return;
