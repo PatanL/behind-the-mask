@@ -21,7 +21,7 @@ export class Speech {
     });
   }
 
-  clear() { this.text.innerHTML = ''; this.caret = null; this.spans = []; }
+  clear() { this.text.innerHTML = ''; this.caret = null; this.spans = []; this.lineStart = true; this.pendingBullet = false; }
 
   begin() {
     this.clear();
@@ -34,6 +34,7 @@ export class Speech {
   continueLine() {
     if (!this.caret) { this.caret = document.createElement('span'); this.caret.className = 'caret'; this.text.appendChild(this.caret); }
     if (this.text.childNodes.length > 1) this.text.insertBefore(document.createElement('br'), this.caret);
+    this.lineStart = true; this.pendingBullet = false;
     while (this.text.childNodes.length > 600) this.text.firstChild.remove();
     this.text.querySelectorAll('.tok[data-i]').forEach((s) => { delete s.dataset.i; s.classList.add('old'); });
     this.spans = [];
@@ -43,8 +44,10 @@ export class Speech {
   add(i, tok, delta, focus, { swingMark = false, instant = false, changed = false } = {}) {
     const parts = tok.t.split('\n');
     parts.forEach((part, k) => {
-      if (k > 0) this.text.insertBefore(document.createElement('br'), this.caret);
+      if (k > 0) { this.text.insertBefore(document.createElement('br'), this.caret); this.lineStart = true; this.pendingBullet = false; }
+      part = this._plain(part);
       if (!part) return;
+      if (part.trim()) this.lineStart = false;
       const s = document.createElement('span');
       s.className = instant ? (changed ? 'tok changed' : 'tok') : 'tok new';
       s.dataset.i = i;
@@ -63,6 +66,19 @@ export class Speech {
       this.spans[i] = s;
       if (!instant) setTimeout(() => s.classList.remove('new'), 520);
     });
+  }
+
+  /** Subtitles show words, not markdown: no emphasis stars or heading marks; a list item starts with a bullet. */
+  _plain(part) {
+    if (this.pendingBullet) {            // a lone "*" or "-" opened the line: a list bullet if a space follows
+      this.pendingBullet = false;
+      if (/^\s/.test(part)) part = '• ' + part.replace(/^\s+/, '');
+    } else if (this.lineStart) {
+      part = part.replace(/^\s+/, '');
+      if (/^[*-]$/.test(part)) { this.pendingBullet = true; return ''; }
+      part = part.replace(/^[*-]\s+/, '• ').replace(/^#{1,6}\s*/, '');
+    }
+    return part.replace(/\*+/g, '');
   }
 
   /** The answer is done: the last lines simply stay. */
