@@ -29,7 +29,18 @@ export async function liveStatus() {
  */
 export function createLive(ctx) {
   const { $, stage, speech } = ctx;
-  let ws = null, on = false, story = null, lastListen = 0, retry = 0, shownTalk = null, topic = '', viewers = 0;
+  let ws = null, on = false, story = null, lastListen = 0, retry = 0, shownTalk = null, topic = '', viewers = 0, lite = false;
+  // taps go out in batches (counts per feeling, every 0.4 s): a tenth of the messages, the same push
+  const counts = {};
+  let tapTimer = 0;
+  const flushTaps = () => {
+    tapTimer = 0;
+    if (!Object.keys(counts).length || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: 'taps', c: { ...counts } }));
+    for (const k of Object.keys(counts)) delete counts[k];
+  };
+  // the word inspector asks for a word's alternatives only when someone taps it
+  const altWait = new Map();
 
   // ---- buttons (press and hold to keep pushing)
   const host = $('#live-buttons');
@@ -56,7 +67,8 @@ export function createLive(ctx) {
 
   function tap(b, el) {
     if (!ws || ws.readyState !== 1) return;
-    ws.send(JSON.stringify({ type: 'tap', b }));
+    counts[b] = (counts[b] || 0) + 1;
+    if (!tapTimer) tapTimer = setTimeout(flushTaps, 400);
     el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
     navigator.vibrate?.(6);
     const now = performance.now();
@@ -77,12 +89,13 @@ export function createLive(ctx) {
     if (cont) speech.continueLine(); else speech.begin();
     $('#speech').classList.remove('overdrive');
     topic = msg.topic || ''; label();
+    if (msg.pace) beatMs = 1000 / msg.pace;   // words are shown at the pace they are written
     if (!cont) stage.face.react('think');
     const id = msg.id;
     setTimeout(() => { if (on && story?.id === id && !story.ended) stage.face.setActivity({ writing: true }); }, cont ? 150 : 700);
     syncDoc();
   }
-  function label() { $('#speech-label').textContent = `Live · talking about ${topic}${viewers > 1 ? ` · ${viewers} people here` : ''}`; }
+  function label() { $('#speech-label').textContent = `Live · talking about ${topic}${viewers > 1 ? ` · ${viewers} people here` : ''}${lite ? ' · a few seconds behind' : ''}`; }
   const meanE = (toks, k) => (toks.length ? toks.reduce((s, t) => s + t.e[k], 0) / toks.length : 0);
   function pushAt(tok) {
     // which button dominated the push when this word was written (weights relative to each button's full strength)
@@ -116,14 +129,16 @@ export function createLive(ctx) {
       if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, ema[focus]) * 100)}%`; }
     }
   }
-  function tokens(msg) {
+  // a compact word entry: t (text), e (readout), s (push), f (features), p/q/qx/k (for the underline),
+  // b (the unpushed baseline's readout at the same step)
+  function addWord(w, instant) {
+    if (w.b) story.plain.push({ e: w.b });
+    if (w.t != null) addSteered({ t: w.t, e: w.e, s: w.s, f: w.f, p: w.p, q: w.q, qx: w.qx, k: w.k }, instant);
+  }
+  function catchUp(msg) {
     if (!story || msg.id !== story.id) return;
-    const instant = !!msg.catchup;
-    for (const it of msg.items) {
-      if (it.stream === 'plain') story.plain.push(it.tok);
-      else if (it.stream === 'steered') addSteered(it.tok, instant);
-    }
-    if (instant) stage.face.setEmotion(ctx.faceFrom(lift));
+    for (const w of msg.w) addWord(w, true);
+    stage.face.setEmotion(ctx.faceFrom(lift));
     syncDoc();
   }
   // between turns: a breath, not a sign-off (the next turn follows within a second)
@@ -149,8 +164,9 @@ export function createLive(ctx) {
   // ---- the crowd meter
   function crowd(msg) {
     const p = msg.power || 0;
-    bar.querySelectorAll('i').forEach((el) => { el.style.width = `${(msg.mix?.[el.dataset.b] || 0) * p * 100}%`; });
-    const lead = BUTTONS.reduce((a, b) => ((msg.mix?.[b] || 0) > (msg.mix?.[a] || 0) ? b : a), BUTTONS[0]);
+    const mix = Object.fromEntries(BUTTONS.map((b, i) => [b, (msg.mix?.[i] || 0) / 100]));   // compact: percent, in BUTTONS order
+    bar.querySelectorAll('i').forEach((el) => { el.style.width = `${(mix[el.dataset.b] || 0) * p * 100}%`; });
+    const lead = BUTTONS.reduce((a, b) => (mix[b] > mix[a] ? b : a), BUTTONS[0]);
     $('#crowd-power').textContent = p < 0.04 ? 'Nobody is pushing: it talks as trained'
       : `${p < 0.35 ? 'A gentle' : p < 0.7 ? 'A strong' : 'A full'} push, mostly ${lead === 'unmask' ? 'off the mask' : EMO[lead].label.toLowerCase()}`;
     $('#crowd-viewers').textContent = msg.viewers > 1 ? `${msg.viewers} steering` : 'Just you';
@@ -158,8 +174,8 @@ export function createLive(ctx) {
     $('#new-topic').disabled = !msg.topic_ready || msg.changing;
     ctx.onPush?.(p < 0.04 ? null : lead, p);
     // other people's taps light the buttons
-    for (const [b, n] of Object.entries(msg.taps || {})) {
-      const el = host.querySelector(`[data-b="${b}"]`);
+    for (const [i, n] of (msg.taps || []).entries()) {
+      const el = host.querySelector(`[data-b="${BUTTONS[i]}"]`);
       if (el) el.style.setProperty('--heat', Math.min(1, n / 6).toFixed(2));
     }
     status(!msg.ready ? 'The AI is waking up (loading the model)…'
@@ -170,33 +186,39 @@ export function createLive(ctx) {
   // ---- an even flow: words are shown at a steady rhythm (the pace they are written at, measured), even when the
   // network delivers them in clumps. Turn starts and ends wait in line behind the words before them.
   const queue = [];
-  let pacer = 0, lastArrive = 0, beatMs = 125;
+  let pacer = 0, beatMs = 167;
+  const isWord = (m) => m.type === 'w1' && m.w.t != null;
   function play(msg) {
     if (msg.type === 'live_begin') begin(msg);
-    else if (msg.type === 'live_tokens') tokens(msg);
+    else if (msg.type === 'w1') { if (story && msg.id === story.id) { addWord(msg.w, false); syncDoc(); } }
     else if (msg.type === 'live_end') end(msg);
     else if (msg.type === 'live_error') { if (story) { stopFace(); story = null; } }
   }
+  // words arrive in small batches; they are released one by one at the writing pace. When the line runs dry,
+  // it waits for a small buffer (a few words; more for the lighter, slower-batched stream) before starting again,
+  // so the rhythm doesn't stutter at every batch.
+  let primed = false;
   function drain() {
     pacer = 0;
+    const words = queue.filter(isWord).length, minBuffer = lite ? 10 : 2;
+    if (!primed && words < minBuffer && !queue.some((m) => !isWord(m) && m.type !== 'w1')) return;
+    primed = true;
     while (queue.length) {
       const msg = queue.shift();
       play(msg);
-      if (msg.type === 'live_tokens' && msg.items.some((it) => it.stream === 'steered')) {
-        // a backlog (a burst arrived) is worked off a little faster, never in a jump
-        const k = queue.length > 8 ? 0.75 : queue.length > 3 ? 0.9 : 1;
+      if (isWord(msg)) {
+        const left = queue.filter(isWord).length;
+        // a backlog is worked off a little faster, never in a jump
+        const k = left > minBuffer + 12 ? 0.75 : left > minBuffer + 4 ? 0.9 : 1;
         pacer = setTimeout(drain, beatMs * k);
         return;
       }
     }
+    primed = false;
   }
   function enqueue(msg) {
-    if (msg.type === 'live_tokens' && msg.items.some((it) => it.stream === 'steered')) {
-      const now = performance.now(), gap = now - lastArrive;
-      if (lastArrive && gap > 40 && gap < 600) beatMs += (Math.min(260, Math.max(70, gap)) - beatMs) * 0.15;   // the writing pace
-      lastArrive = now;
-    }
-    queue.push(msg);
+    if (msg.type === 'ws') { for (const w of msg.w) queue.push({ type: 'w1', id: msg.id, w }); }
+    else queue.push(msg);
     if (!pacer) drain();
   }
 
@@ -206,12 +228,15 @@ export function createLive(ctx) {
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'crowd') crowd(msg);
-      else if (msg.type === 'live_tokens' && msg.catchup) { if (story && story.id === msg.id) tokens(msg); }   // a late joiner's catch-up: at once
+      else if (msg.type === 'wc') catchUp(msg);                                 // a late joiner's catch-up: at once
+      else if (msg.type === 'alts') { const r = altWait.get(`${msg.id}:${msg.i}`); if (r) { altWait.delete(`${msg.id}:${msg.i}`); r(msg); } }
+      else if (msg.type === 'mode') { lite = !!msg.lite; label(); }
+      else if (msg.type === 'full') { on = false; ctx.onFull?.(msg.viewers); }   // the room is full: ready-made answers instead
       else if (msg.type === 'live_begin' && !queue.length && !pacer) begin(msg);
       else enqueue(msg);
     };
     ws.onclose = () => {
-      clearTimeout(pacer); pacer = 0; queue.length = 0;
+      clearTimeout(pacer); pacer = 0; queue.length = 0; primed = false;
       if (!on) return;
       if (story) { stopFace(); story = null; }
       status('Reconnecting…');
@@ -221,6 +246,16 @@ export function createLive(ctx) {
   return {
     get on() { return on; },
     newTopic() { if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'topic' })); $('#new-topic').disabled = true; },
+    /** A word's alternatives (with and without the push), fetched when someone inspects it. */
+    alts(i) {
+      if (!story || !ws || ws.readyState !== 1) return Promise.resolve(null);
+      const id = story.id;
+      return new Promise((resolve) => {
+        altWait.set(`${id}:${i}`, resolve);
+        ws.send(JSON.stringify({ type: 'alts', id, i }));
+        setTimeout(() => { if (altWait.delete(`${id}:${i}`)) resolve(null); }, 3000);
+      });
+    },
     enter() {
       if (on) return;
       on = true;
@@ -232,7 +267,8 @@ export function createLive(ctx) {
     leave() {
       if (!on) return;
       on = false;
-      clearTimeout(pacer); pacer = 0; queue.length = 0;
+      clearTimeout(pacer); pacer = 0; queue.length = 0; primed = false; lite = false;
+      clearTimeout(tapTimer); tapTimer = 0;
       try { ws?.close(); } catch { /* closed */ }
       ws = null; story = null;
       stopFace();

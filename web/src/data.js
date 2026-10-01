@@ -26,10 +26,12 @@ export function probIn(alts, tok) {
 const STOP = new Set(['the', 'and', 'but', 'for', 'you', 'your', 'are', 'was', 'were', 'with', 'that', 'this', 'have', 'has', 'had', 'not', 'can', 'its', "it's", 'all', 'any', 'our', 'out', 'too', 'very', 'just', 'what', 'when', 'from', 'they', 'them', 'there', 'then', 'than', 'been', 'will', 'would', 'could', 'should', 'into', 'about', "i'm", "i've", "i'd", "i'll", 'also', 'some', 'more', 'most', 'like', 'here', 'how', 'who', 'why', 'let', 'get', 'got']);
 /** Did the push change this choice? (the chosen word became >= 2.5x likelier than without the push) */
 export function pushInfo(tok) {
-  if (!tok.cf) return null;
-  const cf = probIn(tok.cf, tok.t);
+  // full form (pre-computed answers, or a live word after its alternatives were fetched): tok.cf; compact live form:
+  // q = its probability without the push (exact if qx), k = it was the unpushed favourite too
+  if (!tok.cf && tok.q == null) return null;
+  const cf = tok.cf ? probIn(tok.cf, tok.t) : { p: tok.q, exact: !!tok.qx };
   const ratio = tok.p / Math.max(cf.p, 1e-4);
-  const cfTop = tok.cf[0][0];
+  const cfTop = tok.cf ? tok.cf[0][0] : tok.k ? tok.t : null;
   const tipped = tok.t.trim() !== '' && tok.p >= 0.08 && ratio >= 2.5 && cfTop !== tok.t;
   // underline only content words where the push flipped the favourite (function words shift too, but distract)
   const w = tok.t.trim().toLowerCase().replace(/[^a-z']/g, '');

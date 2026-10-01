@@ -261,6 +261,11 @@ function setupLive() {
     labels: () => state.index.labels,
     setDoc: (doc) => { if (state.mode === 'live') state.doc = doc; },
     beat: (tok, i) => { if (i < liveLastEmph) liveLastEmph = -10; if (beatFor(tok, i, liveLastEmph)) liveLastEmph = i; },
+    onFull: (n) => {
+      // the live room is full: a ready-made answer instead, and the Live tab is offered again in a minute
+      setMode('made');
+      $('#go-note').textContent = `Live is full right now (${n} watching). Try a ready-made answer, then Live again in a minute.`;
+    },
     onPush: (lead, p) => {
       const lv = p < 0.35 ? 'little' : p < 0.7 ? 'lot' : 'toomuch', key = `${lead}|${lv}`;
       if (key === livePushKey) return;
@@ -365,6 +370,10 @@ async function doShare() {
 function inspect(i, el) {
   const doc = state.doc; if (!doc || !el) return;
   const st = doc.streams.steered.tokens, tok = st[i];
+  if (tok && !tok.cf && state.mode === 'live') {   // live words carry no alternatives until someone looks
+    live.alts(i).then((r) => { if (r && state.doc === doc) { tok.a = r.a; tok.cf = r.cf; inspect(i, el); } });
+    return;
+  }
   const box = $('#inspect');
   const before = textOf(st.slice(Math.max(0, i - 10), i));
   $('#inspect-context').innerHTML = `…${esc(before)}<b>${esc(tok.t)}</b>`;

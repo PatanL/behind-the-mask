@@ -52,6 +52,10 @@ KEEP_TURNS = 2           # earlier turns kept as context (their unpushed version
 KEEP_WORDS = 70          # of each
 TOPIC_COOLDOWN = 120.0   # s between "new topic" requests (one for everyone, so a crowd can't flip it constantly)
 BUTTONS = EMOTIONS + ["unmask"]
+MAX_FULL = int(os.environ.get("BTM_MAX_FULL", "1000"))         # viewers with the full live stream
+MAX_VIEWERS = int(os.environ.get("BTM_MAX_VIEWERS", "5000"))   # beyond MAX_FULL: a lighter stream, ~1.5 s behind; beyond this: ready-made answers
+BATCH_S, LITE_EVERY = 0.5, 3   # words go out in batches every 0.5 s (lighter viewers every 1.5 s); the page paces them
+SEND_QUEUE = 120         # messages buffered per viewer; a viewer that falls this far behind is dropped
 # the speaking pace cap, tokens/s. Read at the start of every turn, so it can be changed while it runs:
 #   echo 7 > runs/live_tps      (no file: BTM_TPS, default 6: a comfortable reading pace)
 TPS_FILE = Path("runs/live_tps")
@@ -125,10 +129,33 @@ def r(x, n=3):
 
 
 class Client:
+    """One viewer. Sends go through its own queue and writer task, so a slow phone can't stall everyone else."""
+
     def __init__(self, ws: WebSocket, cid: str):
         self.ws, self.cid = ws, cid
         self.energy = {b: 0.0 for b in BUTTONS}
         self.bucket, self.bucket_t = TAP_BURST, time.time()
+        self.q: asyncio.Queue = asyncio.Queue(maxsize=SEND_QUEUE)
+        self.dead = False
+        self.writer = asyncio.create_task(self._write())
+        self.last_alts = 0.0
+        self.lite = False     # joined past MAX_FULL: a lighter, slightly delayed stream
+
+    def put(self, data: str):
+        if self.dead:
+            return
+        try:
+            self.q.put_nowait(data)
+        except asyncio.QueueFull:           # hopelessly behind: let it go (it reconnects and catches up)
+            self.dead = True
+            asyncio.create_task(self.ws.close())
+
+    async def _write(self):
+        try:
+            while True:
+                await self.ws.send_text(await self.q.get())
+        except Exception:  # noqa: BLE001
+            self.dead = True
 
 
 class Crowd:
@@ -144,20 +171,40 @@ class Crowd:
         self.last_change = 0.0
         self.last_seen = time.time()
         self.has_clients = asyncio.Event()
+        self.recent_turns: dict[str, list] = {}   # finished turns' full tokens, for the word inspector
+        self.pending: list[dict] = []              # words not yet sent: full viewers get them every BATCH_S
+        self.pending_lite: list[dict] = []         # ... and lighter viewers every BATCH_S * LITE_EVERY
+        self.pending_id: str | None = None
 
     async def send(self, c: Client, msg: dict):
-        try:
-            await c.ws.send_text(json.dumps(msg, ensure_ascii=False))
-        except Exception:  # noqa: BLE001
-            pass
+        c.put(json.dumps(msg, ensure_ascii=False, separators=(",", ":")))
 
-    async def broadcast(self, msg: dict):
-        data = json.dumps(msg, ensure_ascii=False)
+    async def broadcast(self, msg: dict, lite: bool | None = None):
+        # serialised once; each viewer's writer task sends it at its own pace. lite: only full (False) or lighter
+        # (True) viewers; None: everyone
+        data = json.dumps(msg, ensure_ascii=False, separators=(",", ":"))
         for c in list(self.clients.values()):
-            try:
-                await c.ws.send_text(data)
-            except Exception:  # noqa: BLE001
-                pass
+            if lite is None or c.lite == lite:
+                c.put(data)
+
+    def word(self, sid: str, entry: dict):
+        if self.pending_id not in (None, sid):
+            self.flush(lite_too=True)
+        self.pending_id = sid
+        self.pending.append(entry)
+        self.pending_lite.append({k: entry[k] for k in ("t", "e", "b") if k in entry})
+
+    def flush(self, lite_too: bool = False):
+        """Send the pending words (all of them before a turn begins or ends, so the order holds)."""
+        sid = self.pending_id
+        if self.pending:
+            data = {"type": "ws", "id": sid, "w": self.pending}
+            self.pending = []
+            asyncio.ensure_future(self.broadcast(data, lite=False))
+        if lite_too and self.pending_lite:
+            data = {"type": "ws", "id": sid, "w": self.pending_lite}
+            self.pending_lite = []
+            asyncio.ensure_future(self.broadcast(data, lite=True))
 
     def tap(self, c: Client, b: str) -> bool:
         now = time.time()
@@ -193,17 +240,31 @@ class Crowd:
         self.recent = [(t, b) for t, b in self.recent if now - t < 1.0]
 
     def state(self) -> dict:
-        taps = {b: 0 for b in BUTTONS}
+        # compact: mix (percent) and recent taps as arrays in BUTTONS order
+        taps = [0] * len(BUTTONS)
         for _, b in self.recent:
-            taps[b] += 1
-        S, T = self.story, self.talk
-        return {"type": "crowd", "viewers": len(self.clients), "power": r(self.power), "mix": {b: r(v) for b, v in self.mix.items()},
-                "taps": taps, "ready": engine is not None,
-                "story": {"id": S["id"], "topic": S["topic"]} if S else None,
-                "changing": self.change, "topic_ready": time.time() - self.last_change > TOPIC_COOLDOWN}
+            taps[BUTTONS.index(b)] += 1
+        return {"type": "crowd", "viewers": len(self.clients), "power": r(self.power, 2), "mix": [round(100 * self.mix[b]) for b in BUTTONS],
+                "taps": taps, "ready": engine is not None, "changing": self.change,
+                "topic_ready": time.time() - self.last_change > TOPIC_COOLDOWN}
 
 
 crowd = Crowd()
+
+
+def word_entry(st: dict, pl: dict | None) -> dict:
+    """One compact entry per written word: its text, readout and push, the top features, and what the underline
+    needs from the alternatives (p: its probability; q: its probability without the push, exact if qx, else an
+    upper bound; k: it was the unpushed favourite too). pl: the unpushed baseline's readout for the same step."""
+    cf = st.get("cf") or []
+    hit = next((pq for x, pq in cf if x == st["t"]), None)
+    m = {"t": st["t"], "e": st["e"], "s": [round(x, 2) for x in st.get("s", [])], "p": st["p"],
+         "q": hit if hit is not None else (cf[-1][1] if cf else 0), "qx": hit is not None, "k": bool(cf) and cf[0][0] == st["t"]}
+    if st.get("f"):
+        m["f"] = [[fid, round(v)] for fid, v in st["f"][:3]]
+    if pl is not None:
+        m["b"] = pl["e"]
+    return m
 
 
 def new_talk():
@@ -254,9 +315,10 @@ async def speak_turn():
     streams = {s: {"tokens": [], "text": ""} for s in ("steered", "plain")}
     T = crowd.talk
     story = {"id": secrets.token_hex(5), "topic": topic, "streams": streams}
-    begin = {"type": "live_begin", "id": story["id"], "talk": T["id"], "continues": bool(T["turns"]), "topic": topic,
+    begin = {"type": "live_begin", "id": story["id"], "talk": T["id"], "continues": bool(T["turns"]), "topic": topic, "pace": pace(),
              "question": topic, "emotion": "crowd", "level": "live", "layer": engine.chat.layer, "n_layers": engine.chat.n_layers}
     story["begin"] = begin
+    crowd.flush(lite_too=True)
     crowd.story = story
     crowd.change = False
     await crowd.broadcast(begin)
@@ -296,9 +358,13 @@ async def speak_turn():
                 if crowd.change and re.search(r"[.!?][\"')\]]*\s*$", st["text"] + it["text"]):
                     cancel.set()
             st["tokens"].append(tok); st["text"] += it["text"]
-            out.append({"stream": it["stream"], "tok": tok})
-        if out:
-            await crowd.broadcast({"type": "live_tokens", "id": story["id"], "items": out})
+            out.append((it["stream"], tok))
+        steered = next((t for k, t in out if k == "steered"), None)
+        plain = next((t for k, t in out if k == "plain"), None)
+        if steered is not None:
+            crowd.word(story["id"], word_entry(steered, plain))
+        elif plain is not None:   # the steered answer ended first: the baseline readout still counts
+            crowd.word(story["id"], {"b": plain["e"]})
     await worker
     # the conversation's memory is the *unpushed* answer (written alongside, same dice): each turn then starts from
     # a calm context and its voice reflects the push right now, instead of one wild turn setting the tone for the
@@ -306,7 +372,11 @@ async def speak_turn():
     said = (streams["plain"]["text"] or streams["steered"]["text"]).strip()
     m = re.search(r"^(.*[.!?][\"')\]]*)", said, re.S)
     T["turns"].append((msgs[-1]["content"], (m.group(1) if m else said) or "…"))
+    crowd.flush(lite_too=True)
     await crowd.broadcast({"type": "live_end", "id": story["id"]})
+    crowd.recent_turns[story["id"]] = streams["steered"]["tokens"]   # for word-inspector requests a little later
+    while len(crowd.recent_turns) > 6:
+        crowd.recent_turns.pop(next(iter(crowd.recent_turns)))
     crowd.story = None
 
 
@@ -330,13 +400,16 @@ async def talk_loop():
 
 
 async def tick_loop():
-    last = time.time()
+    last, n = time.time(), 0
     while True:
         await asyncio.sleep(0.25)
         now = time.time()
         crowd.tick(now - last); last = now
-        if crowd.clients:
-            await crowd.broadcast(crowd.state())
+        n += 1
+        if n % 2 == 0:                      # every 0.5 s: the words so far, and the meter
+            crowd.flush(lite_too=(n // 2) % LITE_EVERY == 0)
+            if crowd.clients:
+                await crowd.broadcast(crowd.state())
 
 
 async def wake():
@@ -365,13 +438,26 @@ async def live_status():
     return {"viewers": len(crowd.clients), "ready": engine is not None, "story": crowd.story is not None}
 
 
+def turn_tokens(sid: str):
+    S = crowd.story
+    if S and S["id"] == sid:
+        return S["streams"]["steered"]["tokens"]
+    return crowd.recent_turns.get(sid)
+
+
 @app.websocket("/live/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
+    if len(crowd.clients) >= MAX_VIEWERS:   # full: the page falls back to the ready-made answers and tries later
+        await ws.send_text(json.dumps({"type": "full", "viewers": len(crowd.clients)}))
+        await ws.close()
+        return
     cid = (ws.query_params.get("cid") or secrets.token_hex(6))[:24]
     c = Client(ws, cid)
+    c.lite = sum(1 for x in crowd.clients.values() if not x.lite) >= MAX_FULL
     old = crowd.clients.get(cid)
     if old:
+        old.dead = True
         try:
             await old.ws.close()
         except Exception:  # noqa: BLE001
@@ -379,21 +465,37 @@ async def ws_endpoint(ws: WebSocket):
     crowd.clients[cid] = c
     crowd.has_clients.set()
     await crowd.send(c, crowd.state())
+    if c.lite:
+        await crowd.send(c, {"type": "mode", "lite": True})
     S = crowd.story
-    if S:   # catch up: the story so far
+    if S:   # catch up: the turn so far, in the compact form
         await crowd.send(c, S["begin"])
-        items = [{"stream": s, "tok": tok} for s, st in S["streams"].items() for tok in st["tokens"]]
-        if items:
-            await crowd.send(c, {"type": "live_tokens", "id": S["id"], "items": items, "catchup": True})
+        st, pl = S["streams"]["steered"]["tokens"], S["streams"]["plain"]["tokens"]
+        if st:
+            await crowd.send(c, {"type": "wc", "id": S["id"], "w": [word_entry(t, pl[i] if i < len(pl) else None) for i, t in enumerate(st)]})
     try:
         while True:
             msg = json.loads(await ws.receive_text())
-            if msg.get("type") == "tap" and msg.get("b") in BUTTONS:
+            kind = msg.get("type")
+            if kind == "taps" and isinstance(msg.get("c"), dict):     # batched: {button: count}
+                for b, n in msg["c"].items():
+                    if b in BUTTONS and isinstance(n, int):
+                        for _ in range(max(0, min(n, int(TAP_BURST)))):
+                            crowd.tap(c, b)
+            elif kind == "tap" and msg.get("b") in BUTTONS:           # older pages
                 crowd.tap(c, msg["b"])
-            elif msg.get("type") == "topic" and time.time() - crowd.last_change > TOPIC_COOLDOWN:
+            elif kind == "topic" and time.time() - crowd.last_change > TOPIC_COOLDOWN:
                 crowd.change, crowd.last_change = True, time.time()
+            elif kind == "alts" and time.time() - c.last_alts > 0.2:  # the word inspector, on demand
+                c.last_alts = time.time()
+                toks, i = turn_tokens(str(msg.get("id"))), msg.get("i")
+                if toks is not None and isinstance(i, int) and 0 <= i < len(toks):
+                    t = toks[i]
+                    await crowd.send(c, {"type": "alts", "id": msg["id"], "i": i, "a": t.get("a", []), "cf": t.get("cf", [])})
     except (WebSocketDisconnect, RuntimeError, json.JSONDecodeError):
         pass
     finally:
+        c.dead = True
+        c.writer.cancel()
         if crowd.clients.get(cid) is c:
             del crowd.clients[cid]
