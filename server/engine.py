@@ -12,6 +12,7 @@ and the model's own emotion readout (z-scores along each emotion direction, meas
 """
 from __future__ import annotations
 
+import copy
 import math
 import re
 import threading
@@ -44,6 +45,9 @@ class GenConfig:
     min_step: float = 0.0      # seconds per token at least: a pace cap (live), 0 = as fast as it runs
     # a long prompt (the live conversation) is read in pieces of this many tokens: bounded memory (0 = in one go)
     prefill_chunk: int = 1024
+    # live: after each turn keep the memory (KV cache) of the conversation as visitors saw it, so the next turn
+    # appends only its new words instead of re-reading the whole history (see Engine.snapshot)
+    keep_snapshot: bool = False
 
 
 def chat_prompt_ids(mind: Mind, text) -> list[int]:
@@ -120,6 +124,14 @@ def _alts(tok, logits: torch.Tensor, k: int):
     return [[tok.decode([int(t)]), round(float(q), 4)] for q, t in zip(v, i)]
 
 
+def _row_cache(cache, row: int, device):
+    """A copy of one row of a batched KV cache (the hybrid model's recurrent state can't be rewound, so it is
+    copied at the right moment rather than cropped later)."""
+    c = copy.deepcopy(cache)
+    c.reorder_cache(torch.tensor([row], device=device))
+    return c
+
+
 def _forward(model, ids, past, chunk: int):
     """One forward pass that keeps only the last position's logits (the full [tokens x vocab] logits of a 10k-token
     prompt are ~10-20 GB); a long prompt with no cache yet goes in pieces of `chunk` tokens, so memory stays bounded."""
@@ -150,14 +162,27 @@ class Engine:
         return torch.stack([v if r else torch.zeros_like(v) for r in rows])
 
     @torch.no_grad()
-    def run(self, prompt: str, steer_ref: dict, emit, cancel: threading.Event | None = None, seed: int | None = None):
+    def run(self, prompt: str, steer_ref: dict, emit, cancel: threading.Event | None = None, seed: int | None = None,
+            prompt_ids: list[int] | None = None, reuse: dict | None = None):
         """Blocking; call from a worker thread. steer_ref: dict (mutated live by the driver) of emotion ->
-        coefficient in units of the typical residual norm. emit(event) is called per event."""
+        coefficient in units of the typical residual norm. emit(event) is called per event.
+        prompt_ids: the chat prompt as token ids (default: rendered from `prompt`). reuse: a previous turn's
+        snapshot {"cache", "ids"}; when prompt_ids starts with its ids, only the rest is read."""
         with self.lock:
             cfg, chat, base = self.cfg, self.chat, self.base
             seed = seed if seed is not None else int(time.time() * 1000) % (2**31)
             gen = torch.Generator(device=chat.device).manual_seed(seed)
-            c_ids = torch.tensor([chat_prompt_ids(chat, prompt)] * 3, device=chat.device)
+            c_prompt = list(prompt_ids) if prompt_ids is not None else chat_prompt_ids(chat, prompt)
+            c_past = None
+            if reuse is not None and len(c_prompt) > len(reuse["ids"]) and c_prompt[:len(reuse["ids"])] == reuse["ids"]:
+                # the conversation so far is already read: start all three rows from it, read only the new words
+                c_past = reuse["cache"]
+                c_past.reorder_cache(torch.zeros(3, dtype=torch.long, device=chat.device))
+                c_ids = torch.tensor([c_prompt[len(reuse["ids"]):]] * 3, device=chat.device)
+            else:
+                c_ids = torch.tensor([c_prompt] * 3, device=chat.device)
+            self.reused = c_past is not None
+            self.snapshot, fed2, pending2, snap = None, [], None, None
             streams = {
                 "plain": Stream(chat.tokenizer, self.chat_stops),
                 "steered": Stream(chat.tokenizer, self.chat_stops),
@@ -172,7 +197,7 @@ class Engine:
             last_user = prompt if isinstance(prompt, str) else next((m["content"] for m in reversed(prompt) if m["role"] == "user"), "")
             emit({"type": "turn_begin", "prompt": last_user, "seed": seed, "base_frame": BASE_FRAME.format(q=last_user.strip()),
                   "layer": {"chat": chat.layer, "base": base.layer if base else None}, "n_layers": {"chat": chat.n_layers, "base": base.n_layers if base else None}})
-            c_past = b_past = None
+            b_past = None
             c_in, b_in = c_ids, b_ids
             last = {}
             t0 = step_t = time.time()
@@ -180,7 +205,7 @@ class Engine:
                 if cancel is not None and cancel.is_set():
                     break
                 steer_now = dict(steer_ref)   # the driver may change it at any time; one snapshot per step
-                if step == 0 and cfg.share_prefill:
+                if step == 0 and cfg.share_prefill and c_past is None:
                     chat.set_coef(self.coef_tensor(steer_now, [False, True]))
                     co = _forward(chat.model, c_in[:2], None, cfg.prefill_chunk)
                     rows = torch.tensor([0, 1, 0], device=chat.device)
@@ -190,6 +215,14 @@ class Engine:
                     chat.set_coef(self.coef_tensor(steer_now, [False, True, False]))
                     co = _forward(chat.model, c_in, c_past, cfg.prefill_chunk)
                     c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :], chat.readout()
+                if pending2 is not None:
+                    fed2.append(pending2)
+                    # the shown (steered) reply just ended and its end token is read: keep the counterfactual row's
+                    # memory now, before the rows go on feeding filler for the plain answer
+                    if cfg.keep_snapshot and snap is None and pending2 in self.chat_stops and streams["steered"].done:
+                        snap = _row_cache(c_past, 2, chat.device)
+                        snap_fed = list(fed2)
+                    pending2 = None
                 if base is not None:
                     base.set_coef(self.coef_tensor(steer_now, [False, True]))
                     bo = _forward(base.model, b_in, b_past, cfg.prefill_chunk)
@@ -244,16 +277,25 @@ class Engine:
                         item["cf_alts"] = _alts(tok, c_logits[2], cfg.top_k_alts)
                     last[name] = item
                 c_in = c_next[:, None]
+                pending2 = int(c_next[2])
                 if base is not None:
                     b_in = b_next[:, None]
                 # pace: at least min_step per token (measured from the previous token), plus any fixed delay
                 time.sleep(max(cfg.step_delay, cfg.min_step - (time.time() - step_t)))
                 step_t = time.time()
+            if cfg.keep_snapshot:
+                if snap is None:   # cut short (cap or cancel): the reply's unread words and an end token come next
+                    snap, snap_fed = _row_cache(c_past, 2, chat.device), list(fed2)
+                    unread = streams["steered"].ids[len(snap_fed):]
+                    tail = unread + [chat.tokenizer.convert_tokens_to_ids("<|im_end|>")]
+                else:
+                    tail = []
+                self.snapshot = {"cache": snap, "ids": c_prompt + snap_fed, "tail": tail}
             emit({"type": "turn_end", "texts": {k: s.text for k, s in streams.items()}, "seconds": round(time.time() - t0, 2)})
             chat.set_coef(None)
             if base is not None:
                 base.set_coef(None)
             # hand the turn's memory back (each turn's prompt has a new length, so cached blocks would pile up)
-            c_past = b_past = co = bo = None
+            c_past = b_past = co = bo = snap = None
             torch.cuda.empty_cache()
             return {k: s.text for k, s in streams.items()}

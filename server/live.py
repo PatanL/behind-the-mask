@@ -67,6 +67,7 @@ OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Ta
            "four sentences at a time. No lists, no headings, no emoji.")
 NUDGE = "{people} Keep talking to them. {topic}"
 FOLLOW = "{people} Keep talking to them about {label}. {follow}"
+TURN = "\n<|im_start|>user\n{nudge}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"   # Qwen3.5's chat template
 FOLLOWS = [  # staying on a topic: neutral prompts to go deeper (never about feelings)
     "Go on: say more about that.",
     "Give them an example of what you mean.",
@@ -270,15 +271,15 @@ def new_talk():
     order = TOPICS[1:]
     random.shuffle(order)
     crowd.talk = {"id": secrets.token_hex(4), "started": time.time(), "turns": [], "order": order, "opening": None,
-                  "topic": TOPICS[0], "topic_t0": time.time(), "follows": []}
+                  "topic": TOPICS[0], "topic_t0": time.time(), "follows": [], "snap": None}
 
 
-def next_messages() -> tuple[list[dict], str]:
-    """The conversation so far (opening + the last few turns) plus the next nudge, and its short topic label."""
+def next_nudge() -> tuple[str, str]:
+    """The next user message (the opening, a new topic or a follow-up) and its short topic label."""
     T, n = crowd.talk, len(crowd.clients)
     if not T["turns"]:
         T["opening"] = FACTS + " " + OPENING.format(people=people(n))
-        return [{"role": "user", "content": T["opening"]}], TOPICS[0][0]
+        return T["opening"], TOPICS[0][0]
     if crowd.change or time.time() - T["topic_t0"] >= TOPIC_SECONDS:
         # a new topic: someone asked for one, or this one has run its five minutes
         if not T["order"]:
@@ -294,6 +295,15 @@ def next_messages() -> tuple[list[dict], str]:
             random.shuffle(T["follows"])
         label = T["topic"][0]
         nudge = FOLLOW.format(people=people(n), label=label, follow=T["follows"].pop())
+    return nudge, label
+
+
+def window(nudge: str, budget: int = HISTORY_TOKENS) -> list[dict]:
+    """The conversation as messages: the opening, the newest whole exchanges that fit in `budget` tokens, the nudge.
+    Used only when the memory has to be read afresh (a new session, or the window is full)."""
+    T = crowd.talk
+    if not T["turns"]:
+        return [{"role": "user", "content": nudge}]
     # Rebuild a rolling conversation from the exact displayed (steered) replies. Keep newest complete
     # exchanges while the entire chat-template prompt remains within HISTORY_TOKENS. Older exchanges
     # fall off as units; replies are never chopped to arbitrary word tails.
@@ -311,20 +321,30 @@ def next_messages() -> tuple[list[dict], str]:
         pair = ([{"role": "assistant", "content": reply}] if asked == T["opening"] else
                 [{"role": "user", "content": asked}, {"role": "assistant", "content": reply}])
         candidate = [opening, *pair, *kept, current]
-        if prompt_tokens(candidate) > HISTORY_TOKENS:
+        if prompt_tokens(candidate) > budget:
             break
         kept = [*pair, *kept]
-    return [opening, *kept, current], label
+    return [opening, *kept, current]
 
 
 async def speak_turn():
     """One turn of the monologue, live, with the crowd's push at every word."""
     loop = asyncio.get_running_loop()
     labels = engine.labels
-    msgs, topic = next_messages()
+    T = crowd.talk
+    nudge, topic = next_nudge()
+    # Memory: the conversation as visitors saw it is still in the model's cache from the last turn, so append only
+    # the new user turn. When that would overflow HISTORY_TOKENS, read a smaller window afresh (60%, so this
+    # happens once in a while, not every turn).
+    snap, T["snap"] = T.get("snap"), None
+    prompt_ids = None
+    if snap is not None:
+        prompt_ids = snap["ids"] + snap["tail"] + engine.chat.tokenizer(TURN.format(nudge=nudge), add_special_tokens=False)["input_ids"]
+        if len(prompt_ids) + TOKENS > HISTORY_TOKENS:
+            snap = prompt_ids = None
+    msgs = [{"role": "user", "content": nudge}] if snap is not None else window(nudge, HISTORY_TOKENS if not T["turns"] else int(HISTORY_TOKENS * 0.6))
     cancel = threading.Event()
     streams = {s: {"tokens": [], "text": ""} for s in ("steered", "plain")}
-    T = crowd.talk
     story = {"id": secrets.token_hex(5), "topic": topic, "streams": streams}
     begin = {"type": "live_begin", "id": story["id"], "talk": T["id"], "continues": bool(T["turns"]), "topic": topic, "pace": pace(),
              "question": topic, "emotion": "crowd", "level": "live", "layer": engine.chat.layer, "n_layers": engine.chat.n_layers}
@@ -339,7 +359,9 @@ async def speak_turn():
         loop.call_soon_threadsafe(q.put_nowait, ev)
 
     engine.cfg.min_step = 1.0 / pace()
-    worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(msgs, crowd.steer, emit, cancel, seed=secrets.randbelow(2**31))))
+    t_start, first = time.time(), [None]
+    worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(msgs, crowd.steer, emit, cancel, seed=secrets.randbelow(2**31),
+                                                                                  prompt_ids=prompt_ids, reuse=snap)))
     while True:
         get = asyncio.ensure_future(q.get())
         done, _ = await asyncio.wait({get, worker}, return_when=asyncio.FIRST_COMPLETED)
@@ -353,6 +375,8 @@ async def speak_turn():
             break
         if ev["type"] != "tokens":
             continue
+        if first[0] is None:
+            first[0] = time.time() - t_start
         out = []
         for it in ev["items"]:
             if it["stream"] not in streams:
@@ -378,8 +402,12 @@ async def speak_turn():
             crowd.word(story["id"], {"b": plain["e"]})
     await worker
     # Remember the exact steered text sent to visitors, not the unsteered control.
-    # next_messages() keeps this exact displayed history in a rolling token-budgeted window.
+    # The next turn appends to this exact displayed history (T["snap"]), or window() re-reads it within HISTORY_TOKENS.
     T["turns"].append((msgs[-1]["content"], streams["steered"]["text"]))
+    T["snap"] = engine.snapshot
+    n_ids = len(engine.snapshot["ids"]) if engine.snapshot else 0
+    print(f"[live] turn {len(T['turns'])}: {'appended to memory' if engine.reused else 'read afresh'}; "
+          f"{n_ids} tokens remembered; first word after {first[0] or 0:.2f} s", flush=True)
     crowd.flush(lite_too=True)
     await crowd.broadcast({"type": "live_end", "id": story["id"]})
     crowd.recent_turns[story["id"]] = streams["steered"]["tokens"]   # for word-inspector requests a little later
@@ -429,7 +457,7 @@ async def wake():
         if SAE:
             chat.load_sae(SAE, SAE_LAYER)
         # No extra repetition penalty or repeated-phrase ban on the live logits.
-        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=0.0, rep_window=120, no_repeat_ngram=0, share_prefill=True))
+        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=0.0, rep_window=120, no_repeat_ngram=0, share_prefill=True, keep_snapshot=True))
 
     engine = await asyncio.get_running_loop().run_in_executor(None, load)
     print(f"[live] ready: {CHAT}, layer {engine.chat.layer}", flush=True)
