@@ -72,7 +72,7 @@ export function createLive(ctx) {
     lift = ORDER.map(() => 0); maskEma = null; maskPlain = null; i = -1;
     ORDER.forEach((e) => { ema[e] = 0; });
     if (cont) speech.continueLine(); else speech.begin();
-    $('#speech').classList.remove('redacted', 'overdrive');
+    $('#speech').classList.remove('overdrive');
     topic = msg.topic || ''; label();
     if (!cont) stage.face.react('think');
     const id = msg.id;

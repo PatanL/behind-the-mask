@@ -134,7 +134,6 @@ async function scrub() {
   const focus = doc.emotion;
   setPush(focus, doc.level);
   $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
-  setRedacted(doc);
   speech.clear();
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
   const maskPlain = pl.length ? pl.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / pl.length : 1;
@@ -191,7 +190,6 @@ async function play(opts = {}) {
   $('#speech-label').textContent = `“${doc.question}”`;
   $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
   $('#push-badge').classList.toggle('warn', doc.level === 'toomuch');
-  setRedacted(doc);
   speech.begin();
   wheel.reset(); wheel.setFocus(focus);
   // a moment to "think": glance aside, press the lips, breathe in, then start writing
@@ -244,14 +242,6 @@ async function play(opts = {}) {
   afterAnswer(doc);
 }
 
-/** A withheld answer (from an earlier, filtered build): its words are blacked out, but its measured readout
- *  still plays on the colours and face. */
-function setRedacted(doc) {
-  const r = !!doc.streams.steered.redacted;
-  $('#speech').classList.toggle('redacted', r);
-  if (r) $('#speech-label').textContent = `“${doc.question}” · words withheld by an earlier filter`;
-}
-
 /** Conversational beats from the text as it is written; returns true for an emphasis beat. */
 function beatFor(tok, i, lastEmph) {
   const t = tok.t;
@@ -291,7 +281,7 @@ function setMode(mode) {
   state.mode = mode;
   state.runId++; state.playing = false; state.doc = null;
   closeInspect();
-  speech.clear(); $('#speech-label').textContent = ''; $('#speech').classList.remove('redacted');
+  speech.clear(); $('#speech-label').textContent = '';
   $('#live').hidden = mode !== 'live'; $('#made').hidden = mode !== 'made';
   $('#mode-live').setAttribute('aria-pressed', String(mode === 'live')); $('#mode-made').setAttribute('aria-pressed', String(mode === 'made'));
   stage.face.setActivity({ writing: false });
@@ -349,11 +339,10 @@ function esc(s) { return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;'
 
 /** After an answer: the last lines stay; the status line says what you can do with them. */
 function afterAnswer(doc) {
-  const redacted = !!doc.streams.steered.redacted, fixed = doc.emotion === 'none' || doc.emotion.includes('>');
+  const fixed = doc.emotion === 'none' || doc.emotion.includes('>');
   state.answered = true;
-  $('#go-note').textContent = redacted ? 'The colours and the face still show what was measured inside it.'
-    : fixed ? 'Tap a word to see what else it might have said.' : 'Tap a word to see what else it might have said, or drag the strength.';
-  $('#share').hidden = redacted || !!state.attract;
+  $('#go-note').textContent = fixed ? 'Tap a word to see what else it might have said.' : 'Tap a word to see what else it might have said, or drag the strength.';
+  $('#share').hidden = !!state.attract;
 }
 
 // ------------------------------------------------------------------ share
@@ -375,7 +364,6 @@ async function doShare() {
 // ------------------------------------------------------------------ word inspector
 function inspect(i, el) {
   const doc = state.doc; if (!doc || !el) return;
-  if (doc.streams.steered.redacted) return;
   const st = doc.streams.steered.tokens, tok = st[i];
   const box = $('#inspect');
   const before = textOf(st.slice(Math.max(0, i - 10), i));

@@ -232,8 +232,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tapb .short { display: none; }
 @media (max-width: 1099px) { .tapb .short { display: inline; } }
 
-.speech.redacted .tok { letter-spacing: -0.06em; opacity: 0.92; cursor: default; }
-.speech.redacted .tok:hover { background: none; }
 @keyframes changed { 0% { background: color-mix(in srgb, var(--push) 45%, transparent); } 100% { background: transparent; } }
 
 /* ---------- subtitles: inside the stage, at the bottom. A fixed box (the label slot plus exactly three lines):
