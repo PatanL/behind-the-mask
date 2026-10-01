@@ -189,7 +189,6 @@ async function play(opts = {}) {
   setPush(focus, doc.level, e2 ? 'swing-start' : null);
   $('#speech-label').textContent = `“${doc.question}”`;
   $('#speech').classList.toggle('overdrive', doc.level === 'toomuch');
-  $('#push-badge').classList.toggle('warn', doc.level === 'toomuch');
   speech.begin();
   wheel.reset(); wheel.setFocus(focus);
   // a moment to "think": glance aside, press the lips, breathe in, then start writing
@@ -271,7 +270,6 @@ function setupLive() {
       if (key === livePushKey) return;
       livePushKey = key;
       setPush(lead, lv);
-      $('#push-badge').textContent = lead ? `Live · everyone is pushing ${lead === 'unmask' ? 'off the mask' : EMO[lead].label.toLowerCase()}` : 'Live · nobody pushing yet';
     },
   });
   $('#mode-live').onclick = () => { touch(); setMode('live'); };
@@ -322,17 +320,20 @@ function showFeatures(tok) {
   host.innerHTML = rows.map(([f, v]) => `<div class="feat" title="${esc(f.examples?.[0] || '')}"><span>${esc(f.label)}</span><i style="width:${Math.min(100, 20 + v * 6)}%"></i></div>`).join('');
 }
 
+let badgeTimer = 0;
 function setPush(emotion, level, swing) {
+  // the buttons already say what is pushed; the badge only announces a mood swing's switch, mid-answer
   const badge = $('#push-badge');
+  clearTimeout(badgeTimer); badge.hidden = true;
   spine.setPush(emotion);
   if (!emotion) {
-    badge.hidden = false; badge.textContent = 'No push · as trained';
     stage.setPushColor('#9fb4ff', 0.1); stage.face.setIrisColor('#8fe6ff');
     return;
   }
-  const lv = { little: 'a little', lot: 'a lot', toomuch: 'way too much', swing: '' }[level] ?? '';
-  badge.hidden = false;
-  badge.textContent = swing === 'swing' ? `Switched to ${EMO[emotion].label}!` : emotion === 'unmask' ? `Pushing against its assistant persona${lv ? ' · ' + lv : ''}` : `Pushing ${EMO[emotion].label.toLowerCase()}${lv ? ' · ' + lv : ''}`;
+  if (swing === 'swing') {
+    badge.textContent = `Switched to ${EMO[emotion].label}!`; badge.hidden = false;
+    badgeTimer = setTimeout(() => { badge.hidden = true; }, 2600);
+  }
   document.documentElement.style.setProperty('--push', EMO[emotion].color);
   stage.setPushColor(EMO[emotion].color, level === 'little' ? 0.35 : level === 'toomuch' ? 1 : 0.7);
   stage.face.setIrisColor(EMO[emotion].color);

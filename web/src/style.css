@@ -151,7 +151,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .speech.overdrive .tok:nth-child(3n) { animation-delay: -0.7s; }
 .speech.overdrive .tok:nth-child(3n+1) { animation-delay: -1.9s; }
 @keyframes strain { 0%, 100% { transform: none; } 48% { transform: translate(0, 0); } 50% { transform: translate(0.6px, -0.4px); text-shadow: -1.5px 0 rgba(255,60,90,0.55), 1.5px 0 rgba(60,200,255,0.55); } 52% { transform: none; } }
-.push-badge.warn::after { content: ' · watch it start to break'; font-weight: 400; opacity: 0.8; }
 
 .stage-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink3); font-size: 14px; letter-spacing: 0.04em; transition: opacity 0.8s ease; pointer-events: none; }
 .stage.loaded .stage-loading { opacity: 0; }
