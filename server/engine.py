@@ -42,6 +42,8 @@ class GenConfig:
     # row 0's cache into row 2 (a third less prefill work: a shorter pause before each new turn)
     share_prefill: bool = False
     min_step: float = 0.0      # seconds per token at least: a pace cap (live), 0 = as fast as it runs
+    # a long prompt (the live conversation) is read in pieces of this many tokens: bounded memory (0 = in one go)
+    prefill_chunk: int = 1024
 
 
 def chat_prompt_ids(mind: Mind, text) -> list[int]:
@@ -118,6 +120,17 @@ def _alts(tok, logits: torch.Tensor, k: int):
     return [[tok.decode([int(t)]), round(float(q), 4)] for q, t in zip(v, i)]
 
 
+def _forward(model, ids, past, chunk: int):
+    """One forward pass that keeps only the last position's logits (the full [tokens x vocab] logits of a 10k-token
+    prompt are ~10-20 GB); a long prompt with no cache yet goes in pieces of `chunk` tokens, so memory stays bounded."""
+    if past is not None or not chunk or ids.shape[1] <= chunk:
+        return model(ids, past_key_values=past, use_cache=True, logits_to_keep=1)
+    out = None
+    for s in range(0, ids.shape[1], chunk):
+        out = model(ids[:, s:s + chunk], past_key_values=None if out is None else out.past_key_values, use_cache=True, logits_to_keep=1)
+    return out
+
+
 class Engine:
     def __init__(self, chat: Mind, base: Mind, cfg: GenConfig = GenConfig()):
         self.chat, self.base, self.cfg = chat, base, cfg
@@ -169,17 +182,17 @@ class Engine:
                 steer_now = dict(steer_ref)   # the driver may change it at any time; one snapshot per step
                 if step == 0 and cfg.share_prefill:
                     chat.set_coef(self.coef_tensor(steer_now, [False, True]))
-                    co = chat.model(c_in[:2], use_cache=True)
+                    co = _forward(chat.model, c_in[:2], None, cfg.prefill_chunk)
                     rows = torch.tensor([0, 1, 0], device=chat.device)
                     co.past_key_values.reorder_cache(rows)
                     c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :].index_select(0, rows), None   # no readout is emitted for the prompt
                 else:
                     chat.set_coef(self.coef_tensor(steer_now, [False, True, False]))
-                    co = chat.model(c_in, past_key_values=c_past, use_cache=True)
+                    co = _forward(chat.model, c_in, c_past, cfg.prefill_chunk)
                     c_past, c_logits, c_ro = co.past_key_values, co.logits[:, -1, :], chat.readout()
                 if base is not None:
                     base.set_coef(self.coef_tensor(steer_now, [False, True]))
-                    bo = base.model(b_in, past_key_values=b_past, use_cache=True)
+                    bo = _forward(base.model, b_in, b_past, cfg.prefill_chunk)
                     b_past, b_logits, b_ro = bo.past_key_values, bo.logits[:, -1, :], base.readout()
                 # the readout of this forward belongs to the token we fed in (emitted last step)
                 if step > 0:
@@ -240,4 +253,7 @@ class Engine:
             chat.set_coef(None)
             if base is not None:
                 base.set_coef(None)
+            # hand the turn's memory back (each turn's prompt has a new length, so cached blocks would pile up)
+            c_past = b_past = co = bo = None
+            torch.cuda.empty_cache()
             return {k: s.text for k, s in streams.items()}

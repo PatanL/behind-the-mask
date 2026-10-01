@@ -29,6 +29,7 @@ ap.add_argument('--tokens', type=int, default=400)  # a cap; answers stop on the
 ap.add_argument('--swing-at', type=int, default=18)
 ap.add_argument('--only', default='')  # comma list of question slugs for a quick partial run
 ap.add_argument('--redo-censored', action='store_true', help='only regenerate performances an earlier output filter withheld or blacked out')
+ap.add_argument('--resume', action='store_true', help="skip performances this format already wrote (no base streams), e.g. after a crash")
 a = ap.parse_args()
 D, OUT = Path(a.dirs), Path(a.out)
 OUT.mkdir(parents=True, exist_ok=True)
@@ -141,6 +142,11 @@ for gi, (group, q) in enumerate(questions):
         jobs.append((f'{e1}>{e2}', 'swing', Steer({e1: levels[e1]['lot']}, {e2: levels[e2]['lot']}, a.swing_at)))
     for emo, lv, st in jobs:
         pid = f"{qs}__{emo.replace('>', '-to-')}__{lv}"
+        if a.resume:
+            fp = OUT / f'{pid}.json'
+            if fp.exists() and '"base_steered"' not in fp.read_text():
+                entry['performances'][f'{emo}|{lv}'] = pid
+                continue
         if a.redo_censored:
             fp = OUT / f'{pid}.json'
             entry['performances'][f'{emo}|{lv}'] = pid
