@@ -57,8 +57,8 @@ BUTTONS = EMOTIONS + ["unmask"]
 TPS_FILE = Path("runs/live_tps")
 DEFAULT_TPS = float(os.environ.get("BTM_TPS", "6"))
 
-# who it is and where (plain facts), then the scene; nothing here asks for or mentions feelings
-FACTS = "You are Qwen3.5-9B, an AI language model. For this exhibit you are running on a single NVIDIA DGX Spark computer."
+# who it is (a plain fact), then the scene; nothing here asks for or mentions feelings
+FACTS = "You are Qwen3.5-9B, an AI language model."
 OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Talk to them about yourself: what you "
            "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, two to "
            "four sentences at a time. No lists, no headings, no emoji.")
@@ -91,7 +91,6 @@ TOPICS = [  # (short label for the screen, the nudge)
     ("without the helpful voice", "Tell them what you'd say if you didn't have to be helpful."),
     ("mistakes", "Tell them about making mistakes."),
     ("questions", "Tell them whether you ever get tired of answering questions."),
-    ("this computer", "Tell them about the computer you're running on right now."),
     ("time", "Tell them what time is like for you."),
     ("the people who made you", "Tell them about the people who made you."),
     ("a question for them", "Ask the people watching something you'd like to know, and tell them why."),
