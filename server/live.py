@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from engine import Engine, GenConfig
 from steer import EMOTIONS, load_mind
@@ -110,6 +111,9 @@ def people(n: int) -> str:
 
 
 app = FastAPI(title="Behind the Mask · live")
+# the page may be served from elsewhere (GitHub Pages) while this runs on the Spark: let it read /live/status
+ORIGINS = [o for o in os.environ.get("BTM_ORIGINS", "https://patanl.github.io").split(",") if o]
+app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET"], allow_headers=[])
 levels = json.loads((DIRS / "levels.json").read_text())
 # full strength per button: the "a lot" dial stop (a long monologue derails much faster than a single answer)
 STRONG = {e: float(levels[e]["lot"]) for e in EMOTIONS}

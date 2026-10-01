@@ -5,7 +5,10 @@ import { EMO, ORDER } from './palette.js';
 
 const BUTTONS = [...ORDER, 'unmask'];
 const BASE = import.meta.env.BASE_URL;
-const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${BASE}live/ws?cid=${cid()}`;
+// where the live server is: the page's own host by default; another host (the Spark, through a tunnel) when the
+// page itself is served from a CDN such as GitHub Pages -- set VITE_LIVE_URL at build time
+const LIVE = (import.meta.env.VITE_LIVE_URL || '').replace(/\/+$/, '');
+const wsUrl = () => (LIVE ? `${LIVE.replace(/^http/, 'ws')}/live/ws` : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${BASE}live/ws`) + `?cid=${cid()}`;
 function cid() {
   // per tab (two tabs are two visitors), kept across reloads so a reconnect replaces the old socket
   try { let v = sessionStorage.getItem('btm-cid'); if (!v) { v = Math.random().toString(36).slice(2, 12); sessionStorage.setItem('btm-cid', v); } return v; }
@@ -15,7 +18,7 @@ function cid() {
 /** Is the live server up? -> {viewers, ready, story} or null */
 export async function liveStatus() {
   try {
-    const r = await fetch(`${BASE}live/status`, { cache: 'no-store' });
+    const r = await fetch(LIVE ? `${LIVE}/live/status` : `${BASE}live/status`, { cache: 'no-store' });
     return r.ok ? await r.json() : null;
   } catch { return null; }
 }

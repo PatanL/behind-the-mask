@@ -108,6 +108,21 @@ docker run -d --gpus all --ipc=host --network host -v ~/.cache/huggingface:/hf -
 cd web && npm run build && npx vite preview      # open /?live=1
 ```
 
+## Publish it
+
+The page is static, so it can live on GitHub Pages (`.github/workflows/pages.yml` builds and deploys it on every
+push to `main`). The live AI has to run on the GPU machine. Give it a public HTTPS address with a tunnel, for
+example Tailscale Funnel on the machine running `vite preview` (which proxies `/live`):
+
+```bash
+tailscale funnel --bg http://<tailscale-ip>:4340
+```
+
+Then set that address as the repository variable `LIVE_URL` (Settings → Secrets and variables → Actions →
+Variables) and re-run the Pages workflow. The page connects to `LIVE_URL/live/ws`, and the live server allows
+`/live/status` requests from the Pages origin (`BTM_ORIGINS`). If the live server is unreachable, the page simply
+opens on the ready-made answers.
+
 ## Models, data and licences
 
 | Component | Licence |
