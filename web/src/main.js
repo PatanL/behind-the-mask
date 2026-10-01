@@ -45,7 +45,7 @@ function buildControls() {
     }
     const b = document.createElement('button');
     b.className = 'chip'; b.textContent = q.text; b.dataset.q = q.id; b.setAttribute('aria-pressed', 'false');
-    b.onclick = () => { touch(); state.qid = q.id; refresh(); };
+    b.onclick = () => { touch(); state.qid = q.id; refresh(); stage.face.react('listen'); };
     qs.appendChild(b);
   }
   const fs = $('#feelings');
@@ -53,7 +53,7 @@ function buildControls() {
     const b = document.createElement('button');
     b.className = `orb ${cls}`; b.dataset.e = key; b.style.setProperty('--c', EMO[key].color);
     b.innerHTML = `<span class="ball"></span><span>${EMO[key].label}</span>`;
-    b.onclick = () => { touch(); state.emotion = key; if (key === 'none' || key === 'swing') state.level = key; else if (!['little', 'mid1', 'lot', 'mid2', 'toomuch'].includes(state.level)) state.level = 'lot'; refresh(); };
+    b.onclick = () => { touch(); stage.face.react('listen'); state.emotion = key; if (key === 'none' || key === 'swing') state.level = key; else if (!['little', 'mid1', 'lot', 'mid2', 'toomuch'].includes(state.level)) state.level = 'lot'; refresh(); };
     fs.appendChild(b);
   };
   ORDER.forEach((e) => feel(e));
@@ -173,7 +173,12 @@ async function play(opts = {}) {
   $('#push-badge').classList.toggle('warn', doc.level === 'toomuch');
   speech.begin();
   feelmap.reset(); feelmap.setFocus(focus);
+  // a moment to "think": glance aside, press the lips, breathe in, then start writing
+  stage.face.react('think');
+  await sleep(opts.fast ? 250 : 950);
+  if (run !== state.runId) return;
   stage.face.setActivity({ writing: true });
+  let lastEmph = -10;
   const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
   const maskPlain = plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1;
   let maskEma = maskPlain;
@@ -199,12 +204,18 @@ async function play(opts = {}) {
     stage.face.setEmotion(faceIn, { intensity: doc.level === 'toomuch' ? 1.25 : 1.0 });
     stage.setGlow(focus ? Math.max(0.15, Math.min(1, (focus === 'unmask' ? tint.unmask : ema[focus]) * 1.3)) : 0.15);
     const t = tok.t;
+    if (/\?\s*$/.test(t)) stage.face.beat('question');
+    else if (/!\s*$/.test(t)) stage.face.beat('exclaim');
+    else if (/[.]\s*$/.test(t) && !/\.\.\s*$/.test(t)) stage.face.beat('period');
+    else if (/[,;:—]\s*$/.test(t)) stage.face.beat('comma');
+    else if (pushInfo(tok)?.shown && i - lastEmph > 6) { stage.face.beat('emphasis'); lastEmph = i; }
     let wait = 62 + Math.min(80, t.length * 6);
     if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
     await sleep(wait / (opts.fast ? 3 : 1));
   }
   speech.end();
   stage.face.setActivity({ writing: false });
+  stage.face.react('done');
   state.playing = false; refresh();
   // the feeling lingers, then relaxes
   // meters settle on the answer's average lift; the face relaxes but keeps a trace of the feeling
@@ -447,6 +458,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   refresh();
   setPush(null);
   $('#push-badge').hidden = true;
+  stage.ready.then(() => { setTimeout(() => stage.face.react('greet'), 1400); return null; }).catch(() => {});
   stage.ready.then(() => $('.stage').classList.add('loaded')).catch(() => $('.stage').classList.add('loaded'));
   if (params.get('autoplay')) { hideHero(); play({ fast: !!params.get('fast') }); }
   if (params.get('tour')) tour();

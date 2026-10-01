@@ -49,6 +49,10 @@ export class Stage {
     this.ro.observe(canvas);
     this.resize();
     this.face.setGaze('camera');
+    // the visitor's pointer, in this canvas' NDC (beyond +-1 when it's over the text or the controls)
+    const toNdc = (e) => { const r = canvas.getBoundingClientRect(); return [((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1)]; };
+    addEventListener('pointermove', (e) => { const [x, y] = toNdc(e); this.face.setPointer(x, y, false); }, { passive: true });
+    addEventListener('pointerdown', (e) => { const [x, y] = toNdc(e); this.face.setPointer(x, y, true); }, { passive: true });
     const loop = () => { this.render(); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }

@@ -349,7 +349,11 @@ export class AndroidFace {
     };
     this.glance = { active: false, until: 0, next: 2.5 };
     this.head = { pitch: { x: 0, v: 0 }, yaw: { x: 0, v: 0 }, roll: { x: 0, v: 0 }, z: { x: 0, v: 0 } };
-    this.breath = { phase: 0 };
+    // breathing: one cycle at a time (irregular depth/length, sighs, a breath before speaking)
+    this.breath = { phase: 0, T: 4.3, inhale: 0.38, depth: 1, from: 0, sigh: false, nextSigh: 18 + 20 * this.rand(), val: 0, vel: 0, speechInhale: false };
+    this.overlays = [];      // timed reactions / conversational beats: {t0, a, h, r, ch, head, gaze}
+    this.pointer = { x: 0, y: 0, t: -10, press: -10, glanceUntil: 0, glanceAt: 0, pending: null, lastNotice: -10 };
+    this.posture = { next: 6 + 6 * this.rand(), target: [0, 0, 0], cur: { p: { x: 0, v: 0 }, y: { x: 0, v: 0 }, r: { x: 0, v: 0 } } };
     this.mouthing = { t: 0, next: 0, target: {}, cur: {} };
     this.pupil = { x: 0.34, v: 0 };
     this.irisColor = new THREE.Color('#7fe7ff');
@@ -380,6 +384,7 @@ export class AndroidFace {
       uSeamDark: { value: 0.28 }, uGlowColor: { value: this.irisColor.clone() }, uGlow: { value: 0.0 }, uHasSeams: { value: 1 },
       uSSS: { value: new THREE.Color(1.0, 0.62, 0.45).multiplyScalar(0.55) }, uWrap: { value: 0.45 },
       uFade: { value: new THREE.Vector2(-0.100, -0.165) },
+      uBreath: { value: 0 },
     };
 
     model.traverse((o) => {
@@ -462,7 +467,16 @@ export class AndroidFace {
       Object.assign(sh.uniforms, U);
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec2 vSeamUv;\nvarying vec3 vObjPos;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeamUv = uv;\nvObjPos = position;');
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSeamUv = uv;\nvObjPos = position;')
+        .replace('#include <common>', '#include <common>\nuniform float uBreath;')
+        .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
+          { // breathing: the upper chest and shoulders rise and open on the inhale (bind space, before skinning)
+            float chest = smoothstep(-0.100, -0.150, position.y);
+            float shoulder = smoothstep(0.040, 0.105, abs(position.x));
+            transformed.y += uBreath * chest * (0.0016 + 0.0034 * shoulder);
+            transformed.z += uBreath * chest * 0.0022 * (1.0 - shoulder) * smoothstep(-0.03, 0.03, position.z);
+            transformed.x += uBreath * chest * shoulder * sign(position.x) * 0.0007;
+          }`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\n' + PORCELAIN_PARS)
         .replace('#include <color_fragment>', `#include <color_fragment>
@@ -493,7 +507,7 @@ export class AndroidFace {
           outgoingLight *= smoothstep(uFade.y, uFade.x, vObjPos.y);
           #include <opaque_fragment>`);
     };
-    m.customProgramCacheKey = () => 'porcelain-v2';
+    m.customProgramCacheKey = () => 'porcelain-v3';
     (this._porcelainMats ||= []).push(m);
     return m;
   }
@@ -585,7 +599,51 @@ export class AndroidFace {
     if (typeof target.x === 'number' && typeof target.y === 'number') { this.gazeMode = 'screen'; this.gazeScreen = { x: target.x, y: target.y }; }
   }
 
-  setActivity({ writing = false } = {}) { this.writing = !!writing; }
+  setActivity({ writing = false } = {}) {
+    if (writing && !this.writing) this.breath.speechInhale = true;   // people inhale before they start speaking
+    this.writing = !!writing;
+  }
+
+  /** Conversational beat while writing: 'comma' | 'period' | 'exclaim' | 'question' | 'emphasis'. */
+  beat(kind) {
+    const t = this.time, R = this.rand;
+    const ov = {
+      comma: { a: 0.08, h: 0.06, r: 0.3, head: { pitch: -0.7 } },
+      period: { a: 0.1, h: 0.12, r: 0.45, head: { pitch: -1.5 }, ch: { mouthPress: 0.12 } },
+      exclaim: { a: 0.07, h: 0.25, r: 0.45, head: { pitch: 1.4 }, ch: { browInnerUp: 0.22, browOuterUp: 0.24, eyeWide: 0.12 } },
+      question: { a: 0.15, h: 0.55, r: 0.5, head: { roll: (R() < 0.5 ? -1 : 1) * 2.6, pitch: 0.6 }, ch: { browInnerUp: 0.16, browOuterUp: 0.2 } },
+      emphasis: { a: 0.05, h: 0.12, r: 0.25, ch: { browInnerUp: 0.12, browOuterUp: 0.14 } },
+    }[kind];
+    if (!ov) return;
+    this.overlays.push({ t0: t, ...ov });
+    if ((kind === 'period' && R() < 0.45) || (kind === 'question' && R() < 0.25)) this.blink.next = t + 0.12;
+  }
+
+  /** Social reactions: 'greet' | 'listen' | 'think' | 'done'. */
+  react(kind) {
+    const t = this.time, side = this.rand() < 0.5 ? -1 : 1;
+    if (kind === 'greet') {
+      // the "eyebrow flash" (Eibl-Eibesfeldt): a ~1/3 s brow raise with a small smile and nod
+      this.overlays.push({ t0: t, a: 0.08, h: 0.32, r: 0.35, ch: { browInnerUp: 0.65, browOuterUp: 0.7, eyeWide: 0.2 }, head: { pitch: 2.2 } });
+      this.overlays.push({ t0: t + 0.15, a: 0.3, h: 1.2, r: 0.9, ch: { mouthSmile: 0.38, cheekSquint: 0.2, eyeSquint: 0.08 }, head: { pitch: -1.6 } });
+    } else if (kind === 'listen') {
+      this.overlays.push({ t0: t, a: 0.35, h: 1.6, r: 0.9, ch: { browInnerUp: 0.08, browOuterUp: 0.06 }, head: { roll: side * 3.5, z: 0.004, pitch: 0.4 } });
+    } else if (kind === 'think') {
+      // cognitive gaze aversion: look up and aside, press the lips, then take a breath to speak
+      this.overlays.push({ t0: t + 0.08, a: 0.12, h: 0.75, r: 0.25, gaze: [side * 11, 9], head: { yaw: side * 3, pitch: 1.2 }, ch: { mouthPress: 0.18, browDown: 0.06 } });
+      this.breath.speechInhale = true;
+    } else if (kind === 'done') {
+      this.overlays.push({ t0: t, a: 0.15, h: 0.25, r: 0.6, head: { pitch: -1.8 }, ch: { mouthPress: 0.15 } });
+      this.overlays.push({ t0: t + 0.5, a: 0.4, h: 0.6, r: 1.2, head: { pitch: 0.6 } });
+    }
+  }
+
+  /** Visitor's pointer in the canvas' NDC (may be outside [-1,1]); press = a click/tap. */
+  setPointer(x, y, press = false) {
+    const P = this.pointer;
+    P.x = x; P.y = y; P.t = this.time;
+    if (press) P.press = this.time;
+  }
 
   setIrisColor(color) {
     this.irisColor.set(color);
@@ -656,6 +714,24 @@ export class AndroidFace {
       add('eyeSquint', 0.05 * W);
       this._mouthing(dt, t, W, add);
     }
+
+    // breathing (computed before the AU springs so it can flare the nostrils / part the lips)
+    this._breathe(dt, t, add);
+
+    // timed reactions and conversational beats
+    const ovHead = { pitch: 0, yaw: 0, roll: 0, z: 0 };
+    this.ovGaze = [0, 0];
+    this.overlays = this.overlays.filter((o) => {
+      const u = t - o.t0;
+      if (u < 0) return true;
+      const env = u < o.a ? smooth(0, o.a, u) : u < o.a + o.h ? 1 : 1 - smooth(o.a + o.h, o.a + o.h + o.r, u);
+      if (u > o.a + o.h + o.r) return false;
+      if (o.ch) for (const [c, v] of Object.entries(o.ch)) add(c, v * env);
+      if (o.head) for (const [k, v] of Object.entries(o.head)) ovHead[k] += v * env;
+      if (o.gaze) { this.ovGaze[0] += o.gaze[0] * env * DEG; this.ovGaze[1] += o.gaze[1] * env * DEG; }
+      return true;
+    });
+    this.ovHead = ovHead;
 
     // idle micro-motion of the face (never frozen)
     if (idle) {
@@ -730,6 +806,50 @@ export class AndroidFace {
     }
   }
 
+  _breathe(dt, t, add) {
+    const B = this.breath, f = this.felt || {};
+    if (!this.options.breathing) { B.val = 0; this.uniforms && (this.uniforms.uBreath.value = 0); return; }
+    const ar = this.arousal || 0;
+    const startCycle = (opts = {}) => {
+      const rate = clamp(14 * (1 + 0.45 * ar) * (1 - 0.3 * (f.calm || 0)), 7, 24);       // breaths / min
+      B.from = B.val;
+      B.T = (60 / rate) * (0.82 + 0.36 * this.rand());                                // irregular cycles
+      B.depth = (0.8 + 0.4 * this.rand()) * (1 + 0.25 * Math.max(0, ar));
+      B.inhale = 0.36 + 0.06 * this.rand();
+      B.sigh = false;
+      if (opts.sigh) { B.sigh = true; B.depth = 2.1 + 0.4 * this.rand(); B.T *= 1.9; B.inhale = 0.33; }
+      if (opts.speech) { B.depth = 1.35; B.T = 1.6; B.inhale = 0.3; }               // quick, deeper in-breath
+      B.phase = 0;
+    };
+    if (B.speechInhale) { B.speechInhale = false; startCycle({ speech: true }); }
+    B.phase += dt / B.T;
+    if (B.phase >= 1) {
+      // sighs: every ~20-60 s at rest; more often when sad or calm, never while speaking
+      const sighNow = t >= B.nextSigh && !this.writing;
+      if (sighNow) B.nextSigh = t + (22 + 40 * this.rand()) / (1 + 1.5 * (f.sadness || 0) + 0.6 * (f.calm || 0));
+      startCycle({ sigh: sighNow });
+    }
+    const ph = B.phase;
+    // inhale: ease-out rise from wherever we were; exhale: slower ease-in fall with a short pause at the bottom
+    let b;
+    if (ph < B.inhale) { const k = ph / B.inhale; b = lerp(B.from, B.depth, Math.sin(k * Math.PI / 2)); }
+    else { const k = clamp((ph - B.inhale) / ((1 - B.inhale) * 0.85)); b = B.depth * (1 - k * k * (3 - 2 * k)); }
+    const prev = B.val;
+    B.val = b;
+    B.vel = (b - prev) / Math.max(dt, 1e-3);
+    this.breathVal = b;
+    if (this.uniforms) this.uniforms.uBreath.value = b;
+    // coupled face: nostrils flare on the in-breath, lips part a little on deep / aroused out-breaths
+    const inh = Math.max(0, B.vel) * B.T * 0.25;
+    add('noseSneer', clamp(0.05 * inh * (1 + Math.max(0, ar))));
+    if (B.sigh) {
+      const exh = ph > B.inhale ? smooth(B.inhale, B.inhale + 0.12, ph) * (1 - smooth(0.75, 1, ph)) : 0;
+      add('jawOpen', 0.035 * exh); add('mouthFunnel', 0.07 * exh); add('mouthLowerDown', 0.04 * exh);
+      add('browInnerUp', 0.12 * (ph < B.inhale ? smooth(0, B.inhale, ph) : 1 - smooth(B.inhale, 1, ph)));
+      add('eyeBlink', 0.18 * exh);
+    } else if (ar > 0.3 && ph > B.inhale) add('jawOpen', 0.012 * ar);
+  }
+
   _mouthing(dt, t, W, add) {
     // silent, irregular syllable-rate lip motion -- not lip-sync, barely visible
     const M = this.mouthing;
@@ -789,6 +909,17 @@ export class AndroidFace {
     return out;
   }
 
+  /** A point on the viewer's side for screen coordinates (sx, sy in canvas NDC): along the camera ray, at
+   *  ~85% of the camera-to-face distance, so looking "at the screen" means looking out toward the visitor. */
+  _screenToViewer(sx, sy, out) {
+    const cam = this.camera;
+    if (!cam) return this._screenToWorld(sx, sy, out);
+    this.anchor.getWorldPosition(this._tmpV2);
+    const d = cam.position.distanceTo(this._tmpV2) * 0.85;
+    out.set(sx, sy, 0.5).unproject(cam).sub(cam.position).normalize().multiplyScalar(d).add(cam.position);
+    return out;
+  }
+
   _gaze(dt, t, W) {
     const E = this.eye;
     const f = this.felt;
@@ -808,7 +939,19 @@ export class AndroidFace {
     } else if (G.active) G.active = false;
     if (G.active) {
       const tt = this.options.textTarget;
-      if (tt.isVector3) tw.copy(tt); else this._screenToWorld(tt.x + 0.15 * this.noise.at(t * 0.7), tt.y, tw);
+      if (tt.isVector3) tw.copy(tt); else this._screenToViewer(tt.x + 0.15 * this.noise.at(t * 0.7), tt.y, tw);
+    }
+    // the visitor's pointer: a tap always draws a quick glance (after ~180 ms saccadic latency);
+    // movement sometimes does, mostly when it's idle
+    const P = this.pointer;
+    if (idle && !G.active && this.camera) {
+      const now = t;
+      if (P.press > P.lastNotice && now - P.press < 0.5) { P.lastNotice = now; P.glanceAt = now + 0.18; P.glanceUntil = now + 0.18 + 0.5 + 0.5 * this.rand(); }
+      else if (now - P.t < 0.4 && now - P.lastNotice > 2.2 && now > P.glanceUntil && this.rand() < dt * (W > 0.5 ? 0.15 : 0.9)) {
+        P.lastNotice = now; P.glanceAt = now + 0.2; P.glanceUntil = now + 0.2 + 0.4 + 0.8 * this.rand();
+      }
+      this.glancingPointer = now >= P.glanceAt && now < P.glanceUntil;
+      if (this.glancingPointer) this._screenToViewer(clamp(P.x, -3, 3), clamp(P.y, -3, 3), tw);
     }
 
     // desired angles relative to the head rest frame
@@ -837,11 +980,13 @@ export class AndroidFace {
           E.nextShift = t + (0.5 + 1.8 * this.rand()) / Math.max(0.35, rate);
         }
       }
-      yaw += E.offset[0];
-      pitch += E.offset[1];
+      yaw += E.offset[0] + (this.ovGaze ? this.ovGaze[0] : 0);
+      pitch += E.offset[1] + (this.ovGaze ? this.ovGaze[1] : 0);
     } else {
       pitch -= f.sadness * 5 * DEG;
     }
+    // glances (pointer / text) are partly head turns, so the eyes alone don't go to the corners
+    if (this.glancingPointer || G.active) { yaw = clamp(yaw, -18 * DEG, 18 * DEG); pitch = clamp(pitch, -15 * DEG, 12 * DEG); }
     // ocular motor range
     yaw = clamp(yaw, -28 * DEG, 28 * DEG);
     pitch = clamp(pitch, -24 * DEG, 18 * DEG);
@@ -904,15 +1049,24 @@ export class AndroidFace {
       yaw += f.fear * 0.25 * this.noise.at(t * 5.3 + 19);
     }
     if (this.options.breathing) {
-      // breathing: ~14/min at rest, slower when calm, faster when aroused; inhale shorter than exhale
-      const rate = clamp(14 * (1 + 0.45 * this.arousal) * (1 - 0.3 * f.calm), 7, 24) / 60;
-      this.breath.phase += dt * rate;
-      const ph = this.breath.phase % 1;
-      const b = ph < 0.4 ? Math.sin((ph / 0.4) * Math.PI / 2) : Math.cos(((ph - 0.4) / 0.6) * Math.PI / 2);
-      this.breathVal = b * b;
-      breathP = (this.breathVal - 0.5) * (0.55 + 0.3 * f.calm);
-      breathY = this.breathVal * (0.0011 + 0.0006 * Math.max(0, this.arousal));
+      // the head rides on the breath: a small lift and chin-up on the in-breath
+      const b = this.breathVal || 0;
+      breathP = (b - 0.5) * (0.7 + 0.3 * f.calm);
+      breathY = b * (0.0018 + 0.0008 * Math.max(0, this.arousal));
     }
+    // slow posture shifts (as if settling its weight) every ~8-20 s
+    const PS = this.posture;
+    if (idle && t >= PS.next) {
+      PS.next = t + 8 + 12 * this.rand();
+      PS.target = [(this.rand() - 0.5) * 3.2, (this.rand() - 0.5) * 4.5, (this.rand() - 0.5) * 4.0];
+    }
+    spring(PS.cur.p, idle ? PS.target[0] : 0, 0.9, dt);
+    spring(PS.cur.y, idle ? PS.target[1] : 0, 0.8, dt);
+    spring(PS.cur.r, idle ? PS.target[2] : 0, 0.8, dt);
+    pitch += PS.cur.p.x; yaw += PS.cur.y.x; roll += PS.cur.r.x;
+    // reactions / beats
+    const oh = this.ovHead || { pitch: 0, yaw: 0, roll: 0, z: 0 };
+    pitch += oh.pitch; yaw += oh.yaw; roll += oh.roll; z += oh.z;
     const wHead = 4.2 - 1.5 * f.calm + 1.5 * Math.max(0, this.arousal);
     spring(H.pitch, pitch, wHead, dt);
     spring(H.yaw, yaw, wHead, dt);
