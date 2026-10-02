@@ -1,5 +1,6 @@
 import { defineConfig, build } from 'vite';
 import { resolve } from 'node:path';
+import { siteMeta } from './site-meta.js';
 
 // steerai.live: the launchpad (web/launchpad: every coin has a live android) at the root, and the Steer AI exhibit
 // (index.html, web/src) at /exhibit/, built by the plugin below with vite.exhibit.config.js. BTM_BASE lets the same
@@ -13,7 +14,7 @@ export default defineConfig({
   root: R('launchpad'),
   base: process.env.BTM_BASE || '/',
   publicDir: R('launchpad/public'),
-  plugins: [exhibit],
+  plugins: [exhibit, siteMeta('')],
   build: { outDir: R('dist'), emptyOutDir: true, chunkSizeWarningLimit: 2000,
     rollupOptions: { input: Object.fromEntries(pages.map((p) => [p, R(`launchpad/${p}.html`)])) } },
   server: { proxy },
