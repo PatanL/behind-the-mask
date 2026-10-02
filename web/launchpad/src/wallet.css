@@ -1,0 +1,40 @@
+/* The wallet picker: self-contained (it opens on the home page's exhibit styles and the other pages' alike). */
+.wl-back { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(2, 3, 8, 0.62); backdrop-filter: blur(6px);
+  opacity: 0; transition: opacity 0.16s; font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; }
+.wl-back.in { opacity: 1; }
+.wl { position: relative; width: 384px; max-height: min(640px, 88vh); overflow: auto; padding: 18px 16px 14px; color: #e6f3ff;
+  background: linear-gradient(180deg, rgba(12, 20, 36, 0.97), rgba(6, 10, 20, 0.97)); border: 1px solid rgba(127, 231, 255, 0.26); border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(127, 231, 255, 0.04), 0 30px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(127, 231, 255, 0.08);
+  transform: translateY(6px) scale(0.985); transition: transform 0.16s; }
+.wl-back.in .wl { transform: none; }
+.wl::before, .wl::after { content: ''; position: absolute; width: 14px; height: 14px; border: 1.5px solid #7fe7ff; pointer-events: none; }
+.wl::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.wl::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.wl-h { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 12px; }
+.wl-t { font-size: 12.5px; letter-spacing: 0.16em; text-transform: uppercase; color: #7fe7ff; }
+.wl-x { background: none; border: 0; color: #93a6c0; font-size: 22px; line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 3px; }
+.wl-x:hover { color: #e6f3ff; background: rgba(127, 231, 255, 0.08); }
+.wl-list { display: grid; gap: 4px; }
+.wl-list.busy { opacity: 0.55; pointer-events: none; }
+.wl-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; border: 1px solid transparent; border-radius: 4px; background: rgba(127, 231, 255, 0.025);
+  color: inherit; font: inherit; text-decoration: none; text-align: left; cursor: pointer; transition: background 0.12s, border-color 0.12s, box-shadow 0.12s; }
+.wl-row:hover, .wl-row:focus-visible { background: rgba(127, 231, 255, 0.07); border-color: rgba(127, 231, 255, 0.26); box-shadow: 0 0 18px rgba(127, 231, 255, 0.1); outline: 0; }
+.wl-ico { flex: none; width: 34px; height: 34px; border-radius: 8px; overflow: hidden; display: grid; place-items: center; font: 600 16px 'Space Grotesk', system-ui, sans-serif; color: #fff; }
+.wl-ico img { width: 100%; height: 100%; object-fit: cover; }
+.wl-n { flex: 1; font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 15.5px; font-weight: 500; letter-spacing: 0.01em; }
+.wl-tag { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 7px; border-radius: 3px; color: #93a6c0; background: rgba(147, 166, 192, 0.1); }
+.wl-tag.ok { color: #5ef0b0; background: rgba(94, 240, 176, 0.1); }
+.wl-go { color: #56657d; font-size: 17px; width: 12px; text-align: center; }
+.wl-row:hover .wl-go { color: #7fe7ff; }
+.wl-sec { margin: 12px 4px 4px; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #56657d; }
+.wl-note { min-height: 0; margin: 8px 4px 0; font-size: 12px; color: #93a6c0; }
+.wl-note:empty { display: none; }
+.wl-note.bad { color: #ff5d6c; }
+.wl-cur { display: flex; align-items: center; gap: 12px; padding: 12px 10px; border: 1px solid rgba(94, 240, 176, 0.3); border-radius: 4px; background: rgba(94, 240, 176, 0.05); }
+.wl-addr { font-size: 12.5px; color: #93a6c0; }
+.wl-acts { display: flex; gap: 6px; margin: 8px 0 4px; }
+.wl-act { flex: 1; padding: 8px; border: 1px solid rgba(127, 231, 255, 0.26); border-radius: 3px; background: rgba(127, 231, 255, 0.03); color: #e6f3ff; cursor: pointer;
+  font: 11px 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; }
+.wl-act:hover { background: rgba(127, 231, 255, 0.09); }
+.wl-act.bad:hover { border-color: rgba(255, 93, 108, 0.5); color: #ff5d6c; background: rgba(255, 93, 108, 0.06); }
+.wl-foot { margin: 14px 4px 0; padding-top: 12px; border-top: 1px solid rgba(127, 231, 255, 0.12); font-size: 10.5px; line-height: 1.5; color: #56657d; letter-spacing: 0.04em; }

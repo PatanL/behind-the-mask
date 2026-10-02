@@ -3,7 +3,7 @@
 import '../../src/style.css';
 import './landing.css';
 import '../../src/main.js';
-import { connect, disconnect, onWallet } from './wallet.js';
+import { pick, onWallet } from './wallet.js';
 const b = document.getElementById('wallet-top');
 onWallet((a) => { b.textContent = a ? `${a.slice(0, 4)}…${a.slice(-4)}` : 'Connect wallet'; b.classList.toggle('on', !!a); });
-b.onclick = () => (b.classList.contains('on') ? disconnect() : connect().catch((e) => alert(e.message)));
+b.onclick = () => pick().catch(() => {});   // connected: the picker shows the wallet, copy, disconnect, switch

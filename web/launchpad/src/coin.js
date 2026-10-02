@@ -6,6 +6,7 @@ import { Stage } from '../../src/stage.js';
 import { Speech } from '../../src/speech.js';
 import { FeelWheel } from '../../src/wheel.js';
 import { EMO, ORDER } from '../../src/palette.js';
+import * as wallet from './wallet.js';
 
 header(new URLSearchParams(location.search).get('id') ? 'Explore' : 'Live'); footer();
 const Q = new URLSearchParams(location.search);
@@ -92,11 +93,9 @@ function walletNote(d) {
 }
 $('#wallet-b').onclick = async () => {
   try {
-    const p = window.phantom?.solana || (window.solana?.isPhantom ? window.solana : null);
-    if (!p) throw new Error('No Solana wallet found (Phantom).');
-    const { publicKey } = await p.connect(); const addr = publicKey.toString();
+    const w = await wallet.connect(); const addr = wallet.address;
     const msg = new TextEncoder().encode(nonceMsg.replace('{address}', addr));
-    const { signature } = await p.signMessage(msg, 'utf8');
+    const signature = await w.signMessage(msg);
     ws.send(JSON.stringify({ type: 'wallet', address: addr, signature: btoa(String.fromCharCode(...signature)) }));
   } catch (e) { $('#wallet-s').textContent = e.message || String(e); }
 };
