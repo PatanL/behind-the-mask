@@ -257,7 +257,7 @@ const PERF_STYLE = {
 // brows moved 0.3-0.5x as much as the actors', its head 0.2-0.5x, and it was almost perfectly symmetric).
 // beatBrow / beatHead scale the brows and head of conversational beats; asym makes a brow beat one-sided;
 // speechHead is head movement while words are coming; headNoise scales the slow idle drift.
-const LIVELY = { beatBrow: 1, beatHead: 1, asym: 0, speechHead: 0, headNoise: 1, moment: 0, momentHead: 0, momentMouth: 0.5, momentEyes: 0.5, momentGaze: 0, momentLid: 0, momentEmo: 2, emoNorm: 0, momentHeadroom: 0, emoPulse: 0, emoSharpen: 0, beatRaise: 1, momentSmile: 1, momentBrowDown: 1, beatGap: 0.9, socialSmile: 1, raiseEmph: 0, emoScale: 1, beats: 1, griefBrow: 1, raiseGain: 1, angerBrow: 1, browSlow: 1, fearFreeze: 0, fearBrow: -1, angerHi: 0, glanceGap: 1, hurtBrow: 1, beatHold: 1, beatMerge: 0, momentCenter: 0, momentHeadSmooth: 0, momentYaw: 1, fearLeadBrow: 1, fearBlink: 0, fearStretch: 1, fearSpeech: 0, outerGain: 1, lidFollow: 0.9, momentSmooth: 0 };
+const LIVELY = { beatBrow: 1, beatHead: 1, asym: 0, speechHead: 0, headNoise: 1, moment: 0, momentHead: 0, momentMouth: 0.5, momentEyes: 0.5, momentGaze: 0, momentLid: 0, momentEmo: 2, emoNorm: 0, momentHeadroom: 0, emoPulse: 0, emoSharpen: 0, beatRaise: 1, momentSmile: 1, momentBrowDown: 1, beatGap: 0.9, socialSmile: 1, raiseEmph: 0, emoScale: 1, beats: 1, griefBrow: 1, raiseGain: 1, angerBrow: 1, browSlow: 1, fearFreeze: 0, fearBrow: -1, angerHi: 0, glanceGap: 1, hurtBrow: 1, beatHold: 1, beatMerge: 0, momentCenter: 0, momentHeadSmooth: 0, momentYaw: 1, fearLeadBrow: 1, fearBlink: 0, fearStretch: 1, fearSpeech: 0, outerGain: 1, lidFollow: 0.9, momentSmooth: 0, momentAngerRaise: 1 };
 // moment: gain of the motion-matched performance moments (setMoments) on the brows and nose; momentMouth / momentEyes
 // relative gains for their mouth (on top of the android's own speech) and squint / cheek; momentHead: their head movement;
 // momentGaze: where the actor looked (degrees, through the face's own saccades); momentLid: their slow lid closure;
@@ -869,9 +869,14 @@ export class AndroidFace {
     // after the springs it carried the actors' tracker jitter and the jumps between moments (the brows twitched)
     const MS = L.momentSmooth > 0 ? (this.momS || (this.momS = ch.map(() => ({ x: 0, v: 0 })))) : null;
     const mdt = Math.min(0.05, Math.max(0, t - (this.momST ?? t))); this.momST = t;
+    // momentAngerRaise: while anger clearly leads, a moment can't raise the brows (the readout calls many film moments
+    // 'anger', and an actor's raised brows over the android's frown read as alarm, not rage)
+    const fe = this.felt || {}, fm = Math.max(1e-3, ...EMOTIONS.map((e) => fe[e] || 0));
+    const angerK = L.momentAngerRaise !== 1 ? smooth(0.6, 0.9, (fe.anger || 0) / fm) * smooth(0.15, 0.4, fe.anger || 0) : 0;
     if (cd) for (let k = 0; k < ch.length; k++) {
       const room = hr ? Math.max(0, 1 - (this.ch[ch[k]]?.x || 0)) : 1;
       let v = G[k] * room * (xf * cd[k] + (pd ? (1 - xf) * pd[k] : 0));
+      if (angerK > 0 && v > 0 && /^brow(Inner|Outer)Up/.test(ch[k])) v *= lerp(1, L.momentAngerRaise, angerK);
       if (MS && /^(brow|eye|cheek)/.test(ch[k])) { spring(MS[k], v, L.momentSmooth, mdt); v = MS[k].x; }
       post[ch[k]] = (post[ch[k]] || 0) + v;
     }
