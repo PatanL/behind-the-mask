@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Steer AI · a live android you can steer</title>
+  <meta name="description" content="A live android you can steer from the inside: push its feelings, ask it things, watch its face. And every coin can have one." />
+  <link rel="stylesheet" href="./src/coin.css" />
+</head>
+<body>
+  <section class="intro"><div class="lbl">// steer ai · live</div>
+    <h1>A live android you can <em>steer from the inside</em>.</h1>
+    <p>Its words and its face come from a language model, and your taps push the model's hidden state while it talks. Push it, ask it things, watch it react.</p></section>
+  <main class="coin">
+    <section class="stage-col">
+      <div class="stage hud scan" id="stage"><canvas id="face"></canvas>
+        <div class="sleep-note" id="sleep-note" hidden><b>Asleep.</b> Nobody is paying for its mind. A trade wakes it.</div>
+        <aside class="inside-r" aria-label="How it feels inside">
+          <div class="lbl">How it feels inside</div>
+          <svg id="wheel" class="wheel" role="img" aria-label="Six feelings; each petal grows with how strongly it reads inside the model"></svg>
+        </aside>
+        <div class="subs"><div class="speech-label" id="speech-label"></div><div class="speech" id="speech"></div></div>
+      </div>
+      <div class="feel"><div class="feelbar" id="feelbar"></div><div class="feel-label" id="feel-label"></div></div>
+    </section>
+    <aside class="side">
+      <div class="panel head">
+        <div class="t1"><h1 id="name">…</h1><span class="tk mono" id="ticker"></span><span class="status" id="status"></span></div>
+        <div class="t2" id="sub"></div>
+        <div class="price"><span class="mono big" id="price">—</span><span class="mono" id="chg"></span></div>
+        <canvas class="chart" id="chart"></canvas>
+        <div class="nocoin" id="nocoin" hidden></div>
+        <div class="kv mono"><div>Mcap<b id="mcap">—</b></div><div>Volume<b id="vol">—</b></div><div>Curve<b id="curve">—</b></div><div>Awake for<b id="left">—</b></div></div>
+        <div class="demo" id="demo" hidden>
+          <span>Demo market: trades are simulated.</span>
+          <button class="btn" data-side="buy" data-sol="0.2">Buy 0.2</button><button class="btn" data-side="buy" data-sol="1">Buy 1</button><button class="btn" data-side="sell" data-sol="0.5">Sell 0.5</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><h3>Steer it</h3><span class="mode" id="mode"></span></div>
+        <div class="taps" id="taps"></div>
+        <div class="mix" id="mix"></div>
+        <div class="why" id="why"></div>
+        <div class="wallet" id="wallet"><button class="btn" id="wallet-b" type="button">Connect wallet</button><span id="wallet-s"></span></div>
+      </div>
+      <div class="panel">
+        <h3>Ask it something</h3>
+        <div class="ask-box" id="ask-box">
+          <form class="ask" id="ask" autocomplete="off"><input class="in" id="ask-in" maxlength="200" placeholder="Ask it something…" /><button class="btn" id="ask-b" type="submit">Ask</button></form>
+          <div class="ask-card" id="ask-card" hidden><div class="ask-card-top"><span class="ask-pill" id="ask-pill"></span><span class="ask-q" id="ask-q"></span></div><div class="ask-why" id="ask-why"></div></div>
+          <div class="ask-line" id="ask-line"></div>
+        </div>
+      </div>
+      <div class="panel char">
+        <h3>Its android</h3>
+        <p id="persona"></p>
+        <div class="kv2" id="char"></div>
+      </div>
+    </aside>
+  </main>
+  <section class="band"><div><div class="lbl">// launch</div><h2>Every coin can have one.</h2>
+    <p>Launch a coin on pump.fun and give it an android: a character, something hidden under its mask, a temperament and a face. Its trading keeps it awake; its chart is its mood.</p></div>
+    <div class="ctas"><a class="btn primary" href="launch.html">Launch a coin</a><a class="btn" href="explore.html">Explore androids</a></div></section>
+  <script type="module" src="./src/coin.js"></script>
+</body>
+</html>

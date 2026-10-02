@@ -2,6 +2,47 @@
 
 Live at https://steerai.live
 
+**Every coin has a live android.** Steer AI is a live android you can steer from the inside, and a launchpad where
+every coin gets one of its own. Launch a coin on pump.fun and give it an android: a character, something hidden under
+its mask, a temperament and a face. Its trading keeps it awake, and its chart is its mood.
+
+- **A live android, steered from the inside.** Its words and its face come from an open-weight model (Qwen3.5-9B).
+  Visitors' taps push the model's hidden state along feeling directions while it talks; the face is driven by what the
+  model's own state reads along them. Anyone can ask it a question (one line per android).
+- **What a creator chooses.** A character (persona prompt). *Under its mask*: a concept in their own words, turned into
+  a steering direction inside the model the way the feelings are (contrastive activation: the same neutral texts read
+  with and without the concept), always pushing a little. A temperament (feelings it drifts back to). A look
+  (porcelain, chrome, matte black or glass; eye colour; marks). Advanced: the model, and whether holders steer it.
+- **The chart is its mood.** Rising prices push joy, falling ones fear, a big sell anger, a flat quiet chart calm.
+- **Asleep and awake.** Its coin's trading volume pays for its compute time; unfunded, it falls asleep (eyes shut,
+  slow breathing) and a trade wakes it with a start.
+- **One model, many androids.** All awake androids share one model on one GPU: each is a row of a shared batch fed
+  one token per step (`server/multimind.py`), with its own steering mix, repetition control and a push budget.
+
+| Path | What |
+|---|---|
+| `server/launchpad.py` | the launchpad server: coins, androids, steering mixes, questions, funding, the API (`/api`) |
+| `server/multimind.py` | many androids on one model (a shared batch, one token per row per step) |
+| `server/lp_concepts.py`, `lp_market.py`, `lp_pump.py`, `lp_wallet.py`, `lp_moderate.py` | concept directions; the chart as mood; pump.fun trades and launching; holders; moderation |
+| `web/launchpad/` | the site: the live android (`index.html`), explore, launch, an android's page, docs |
+| `web/src/face/` | the android face (looks, sleep and startle: `setLook`, `setSleep`, `startle`) |
+
+Run it (a GPU with ~30 GB free):
+
+```bash
+docker run -d --name btm-launchpad --gpus all --ipc=host --network host -v ~/.cache/huggingface:/hf -e HF_HOME=/hf \
+  -e LP_PUMP_LAUNCH=1 -v $PWD/server:/app -v $PWD/runs:/app/runs -w /app btm-server uvicorn launchpad:app --host 127.0.0.1 --port 8770
+cd web && npm install && npm run dev        # the site (proxies /api and /live); `npm run build` makes web/dist
+```
+
+Launching on pump.fun: the creator's wallet (Phantom) pays and signs; the coin's mint key is made in their browser;
+the server only relays the image + metadata upload and asks PumpPortal for the unsigned transaction. No key is held
+on the server. `LP_FLAGSHIP_MINT` pairs the site's own android with its coin once it exists.
+
+## The exhibit
+
+The original Steer AI exhibit lives on at https://steerai.live/exhibit/ (`web/index.html`, `web/src/`):
+
 **An interactive exhibit: push an AI toward joy, sadness, fear… by editing its hidden state, and see what's
 behind its friendly assistant persona.**
 
@@ -151,4 +192,4 @@ Chrome blocks from a public page; test those on the Funnel address itself.
 
 The model's output is not filtered: showing what steering really does is the point. Strong pushes, anger
 especially, can make it write crude, hostile or violent text, and base models are unfiltered text predictors.
-Visitors never type anything: they choose from prompt cards, and in live mode they press feeling buttons.
+Visitors can ask the live androids questions (a short slur blocklist, no other filter), and creators write their androids' characters, which the model itself screens before launch (`server/lp_moderate.py`).

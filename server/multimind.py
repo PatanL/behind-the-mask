@@ -1,0 +1,345 @@
+"""Many minds, one model: several androids talk at once on one GPU.
+
+Each awake android is one row of a shared batch. Every step feeds exactly one token per row: the token it just
+wrote, or (between thoughts) the next token of its next prompt, read one per step. Rows never carry padding into
+the model's recurrent (linear-attention) layers, whose state can't be masked; only the attention layers see the
+gaps, and the attention mask hides them. Decoding is memory-bound, so a step with eight rows costs about what a
+step with one does: eight androids talk at the pace of one.
+
+A new android's first prompt is read on its own at full speed, then its memory is merged into the batch. Each row
+has its own steering mix over every direction the mind holds (the six feelings, the assistant axis, and any custom
+concept directions appended with add_direction), so every android can be pushed differently in the same step.
+"""
+from __future__ import annotations
+
+import collections
+import threading
+import time
+from dataclasses import dataclass, field
+
+import torch
+from transformers import DynamicCache
+
+from engine import _sample, _alts, _forward
+from steer import Mind
+
+
+@dataclass
+class Row:
+    """One android's place in the batch."""
+    key: str
+    steer: dict = field(default_factory=dict)        # direction label -> coefficient (units of residual norm)
+    force: collections.deque = field(default_factory=collections.deque)   # prompt tokens still to read
+    after: str = "rest"                              # when the reading is done: "write" a reply, or "rest"
+    next_id: int | None = None                       # the token to feed next step (just sampled)
+    next_info: dict | None = None                    # its probability and the alternatives it was drawn from
+    pos: int = 0                                     # tokens of its own read so far (its position)
+    writing: bool = False                            # sampling its reply
+    reply: list = field(default_factory=list)        # this reply's token ids
+    max_new: int = 600
+    soft: int = 520                                  # past this many tokens, end at the next sentence end
+    temperature: float = 0.8
+    top_p: float = 0.92
+    on_token: object = None                          # callback(row, tok: dict)  -- every written token
+    on_end: object = None                            # callback(row, text)       -- the reply ended
+    # repetition control (a steered monologue otherwise falls into loops): tokens used in its last rep_window tokens
+    # (this reply and the ones before) are penalised, and no no_repeat_ngram-token phrase may repeat
+    rep_penalty: float = 0.6
+    rep_window: int = 160
+    no_repeat_ngram: int = 5
+    recent: collections.deque = field(default_factory=lambda: collections.deque(maxlen=400))
+
+    @property
+    def idle(self) -> bool:
+        return not self.force and not self.writing
+
+
+def _layer_tensors(layer):
+    """The tensors of one cache layer, by kind: attention (keys, values: [B, h, T, d]) and recurrent (per-row)."""
+    att = [(n, getattr(layer, n)) for n in ("keys", "values") if isinstance(getattr(layer, n, None), torch.Tensor) and getattr(layer, n).numel() > 0]
+    rec = []
+    for n in ("conv_states", "recurrent_states"):
+        v = getattr(layer, n, None)
+        if isinstance(v, (list, tuple)):
+            rec += [(n, i, t) for i, t in enumerate(v) if isinstance(t, torch.Tensor) and t.numel() > 0]
+        elif isinstance(v, dict):
+            rec += [(n, i, t) for i, t in v.items() if isinstance(t, torch.Tensor) and t.numel() > 0]
+    return att, rec
+
+
+class MultiMind:
+    def __init__(self, mind: Mind, step_rate: float = 7.0, compact_at: int = 9000):
+        self.mind, self.model, self.tok = mind, mind.model, mind.tokenizer
+        mind.install()
+        t = self.tok
+        self.stops = {i for i in [t.eos_token_id, t.convert_tokens_to_ids("<|im_end|>"), t.convert_tokens_to_ids("<|endoftext|>")] if isinstance(i, int) and i >= 0}
+        self.filler = t.convert_tokens_to_ids("<|endoftext|>")
+        self.rows: list[Row] = []
+        self.cache = None                 # the batched cache
+        self.mask = None                  # [B, T] bool: which cache columns are this row's own tokens
+        self.lock = threading.RLock()
+        self.step_rate, self.compact_at = step_rate, compact_at
+        self.steps, self.t_step = 0, 0.0
+        self.gen = torch.Generator(device=mind.device).manual_seed(int(time.time()))
+
+    # ------------------------------------------------------------------ directions
+    def add_direction(self, label: str, vec: torch.Tensor, mu: float = 0.0, sd: float = 1.0) -> int:
+        """Append a custom direction ([L+1, H] unit vectors per layer) to the mind, with its readout's neutral-text
+        mean and spread (for the z-score); returns its index."""
+        m = self.mind
+        with self.lock:
+            if label in m.labels:
+                i = m.labels.index(label)
+                m.directions[i] = vec.to(m.directions)
+                m.ro_mu[i], m.ro_sd[i] = mu, sd
+                return i
+            m.directions = torch.cat([m.directions, vec.to(m.directions)[None]], 0)
+            m.labels.append(label)
+            m.ro_mu = torch.cat([m.ro_mu, torch.tensor([mu], device=m.ro_mu.device)])
+            m.ro_sd = torch.cat([m.ro_sd, torch.tensor([sd], device=m.ro_sd.device)])
+            return len(m.labels) - 1
+
+    # ------------------------------------------------------------------ rows
+    @torch.no_grad()
+    def add(self, row: Row, prompt_ids: list[int]):
+        """Read the prompt on its own (full speed), then merge the row into the batch. Its reply starts next step."""
+        m = self.mind
+        with self.lock:
+            m.set_coef(self._coef([row]))
+            out = _forward(self.model, torch.tensor([prompt_ids], device=m.device), None, 1024)
+            row.pos, row.reply, row.force = len(prompt_ids), [], collections.deque()
+            self._merge(out.past_key_values, len(prompt_ids))
+            self.rows.append(row)
+            self._begin(row, out.logits[0, -1])
+
+    def remove(self, key: str):
+        with self.lock:
+            keep = [i for i, r in enumerate(self.rows) if r.key != key]
+            if len(keep) == len(self.rows):
+                return
+            if not keep:
+                self.rows, self.cache, self.mask = [], None, None
+                return
+            idx = torch.tensor(keep, device=self.mind.device)
+            for layer in self.cache.layers:
+                att, rec = _layer_tensors(layer)
+                for n, t in att:
+                    setattr(layer, n, t.index_select(0, idx))
+                for n, i, t in rec:
+                    getattr(layer, n)[i] = t.index_select(0, idx)
+            self.mask = self.mask.index_select(0, idx)
+            self.rows = [self.rows[i] for i in keep]
+
+    def say(self, key: str, prompt_ids: list[int]):
+        """Queue the next prompt for a resting row: read one token per step, then it writes its reply."""
+        with self.lock:
+            r = self.row(key)
+            if r is None or r.writing:
+                return False
+            r.force.extend(prompt_ids)
+            r.after = "write"
+            return True
+
+    def row(self, key: str) -> Row | None:
+        return next((r for r in self.rows if r.key == key), None)
+
+    # ------------------------------------------------------------------ the batch
+    def _merge(self, single, t: int):
+        """Merge a one-row cache (t tokens) into the batch, right-aligned: gaps on the left are masked."""
+        dev = self.mind.device
+        if self.cache is None:
+            self.cache, self.mask = single, torch.ones(1, t, dtype=torch.bool, device=dev)
+            return
+        T = self.mask.shape[1]
+        if t > T:   # the batch grows on the left
+            for layer in self.cache.layers:
+                for n, x in _layer_tensors(layer)[0]:
+                    pad = torch.zeros(*x.shape[:2], t - T, x.shape[3], dtype=x.dtype, device=dev)
+                    setattr(layer, n, torch.cat([pad, x], 2))
+            self.mask = torch.cat([torch.zeros(self.mask.shape[0], t - T, dtype=torch.bool, device=dev), self.mask], 1)
+            T = t
+        for layer, sl in zip(self.cache.layers, single.layers):
+            att_b, rec_b = _layer_tensors(layer)
+            att_s, rec_s = _layer_tensors(sl)
+            for (n, xb), (_, xs) in zip(att_b, att_s):
+                if xs.shape[2] < T:
+                    xs = torch.cat([torch.zeros(*xs.shape[:2], T - xs.shape[2], xs.shape[3], dtype=xs.dtype, device=dev), xs], 2)
+                setattr(layer, n, torch.cat([xb, xs], 0))
+            for (n, i, xb), (_, _, xs) in zip(rec_b, rec_s):
+                getattr(layer, n)[i] = torch.cat([xb, xs.to(xb.dtype)], 0)
+        new = torch.zeros(1, T, dtype=torch.bool, device=dev)
+        new[0, T - t:] = True
+        self.mask = torch.cat([self.mask, new], 0)
+
+    def _compact(self):
+        """Drop cache columns no row uses (the left edge); if still long, squeeze each row's gaps out."""
+        used = self.mask.any(0)
+        first = int(used.nonzero()[0]) if bool(used.any()) else self.mask.shape[1]
+        if first > 0:
+            for layer in self.cache.layers:
+                for n, x in _layer_tensors(layer)[0]:
+                    setattr(layer, n, x[:, :, first:].contiguous())
+            self.mask = self.mask[:, first:]
+        if self.mask.shape[1] <= self.compact_at:
+            return
+        dev, T2 = self.mind.device, int(self.mask.sum(1).max())
+        for layer in self.cache.layers:
+            for n, x in _layer_tensors(layer)[0]:
+                y = torch.zeros(x.shape[0], x.shape[1], T2, x.shape[3], dtype=x.dtype, device=dev)
+                for b in range(x.shape[0]):
+                    cols = self.mask[b].nonzero().squeeze(1)
+                    y[b, :, T2 - len(cols):] = x[b, :, cols]
+                setattr(layer, n, y)
+        m2 = torch.zeros(self.mask.shape[0], T2, dtype=torch.bool, device=dev)
+        for b in range(m2.shape[0]):
+            m2[b, T2 - int(self.mask[b].sum()):] = True
+        self.mask = m2
+
+    def _coef(self, rows):
+        labels = self.mind.labels
+        return torch.tensor([[float(r.steer.get(l, 0.0)) for l in labels] for r in rows])
+
+    def _noise(self, b):
+        V = self.model.config.get_text_config().vocab_size
+        return -torch.log(-torch.log(torch.rand((b, V), generator=self.gen, device=self.mind.device).clamp(1e-9, 1 - 1e-9)))
+
+    def _sample(self, r: Row, logits):
+        return self._sample_many([r], logits[None])[0]
+
+    def _sample_many(self, rows, logits, k_top: int = 1024):
+        """Draw the next token for several rows at once (Gumbel-max over each row's nucleus, within its top k_top):
+        one batched pass instead of one sort of the whole vocabulary per row. -> [(token, {p, a})]"""
+        lg = logits.float().clone()
+        for j, r in enumerate(rows):
+            ids = list(r.recent)[-r.rep_window:]
+            if r.rep_penalty > 0 and ids:
+                lg[j, torch.tensor(sorted(set(ids)), device=lg.device)] -= r.rep_penalty
+            n = r.no_repeat_ngram
+            if n > 1 and len(ids) >= n:
+                prefix, banned = tuple(ids[-(n - 1):]), set()
+                for k in range(len(ids) - n + 1):
+                    if tuple(ids[k:k + n - 1]) == prefix:
+                        banned.add(ids[k + n - 1])
+                if banned:
+                    lg[j, torch.tensor(sorted(banned), device=lg.device)] = -float("inf")
+        temps = torch.tensor([max(1e-4, r.temperature) for r in rows], device=lg.device)[:, None]
+        tops = torch.tensor([r.top_p for r in rows], device=lg.device)[:, None]
+        lp = torch.log_softmax(lg / temps, -1)
+        v, i = torch.topk(lp, k_top, dim=-1)                       # sorted, descending
+        pr = v.exp()
+        keep = (pr.cumsum(-1) - pr) <= tops
+        g = -torch.log(-torch.log(torch.rand(v.shape, generator=self.gen, device=lg.device).clamp(1e-9, 1 - 1e-9)))
+        pick = torch.argmax(torch.where(keep, v + g, torch.full_like(v, -float("inf"))), -1)
+        tok = i.gather(1, pick[:, None])[:, 0]
+        p_all = torch.softmax(lg, -1)
+        p = p_all.gather(1, tok[:, None])[:, 0]
+        av, ai = torch.topk(p_all, 4, dim=-1)
+        tok, p, av, ai = tok.tolist(), p.tolist(), av.tolist(), ai.tolist()
+        return [(t, {"p": pp, "a": [[self.tok.decode([x]), round(y, 4)] for x, y in zip(xs, ys)]}) for t, pp, xs, ys in zip(tok, p, ai, av)]
+
+    def _begin(self, r: Row, logits):
+        """Its prompt is read: draw the first word of its reply."""
+        r.reply, r.writing = [], True
+        t, info = self._sample(r, logits)
+        if t in self.stops:
+            self._end(r, t)
+        else:
+            r.next_id, r.next_info = t, info
+
+    def _end(self, r: Row, t=None):
+        r.writing, r.next_id, r.next_info = False, None, None
+        r.force.append(t if t in self.stops else self.tok.convert_tokens_to_ids("<|im_end|>"))   # the end token is read too
+        r.after = "rest"
+        if r.on_end:
+            r.on_end(r, self.tok.decode(r.reply, skip_special_tokens=True))
+
+    # ------------------------------------------------------------------ one step for every row
+    @torch.no_grad()
+    def step(self) -> bool:
+        """One token for every row that is reading or writing. Returns False when no row is busy."""
+        with self.lock:
+            if not self.rows or all(r.idle for r in self.rows):
+                return False
+            m, dev, B = self.mind, self.mind.device, len(self.rows)
+            feed, kind = [], []
+            for r in self.rows:
+                if r.force:
+                    feed.append(r.force.popleft()); kind.append("read")
+                elif r.writing:
+                    feed.append(r.next_id); kind.append("write")
+                else:
+                    feed.append(self.filler); kind.append("idle")
+            idle = [i for i, k in enumerate(kind) if k == "idle"]
+            # a resting row is fed a filler: its recurrent state is put back afterwards and the filler's attention
+            # column is masked, so the filler leaves no trace
+            saved = self._save_rec(idle) if idle else None
+            am = torch.cat([self.mask, torch.ones(B, 1, dtype=torch.bool, device=dev)], 1)
+            posn = torch.tensor([[r.pos] for r in self.rows], device=dev)
+            m.set_coef(self._coef(self.rows))
+            out = self.model(torch.tensor([[t] for t in feed], device=dev), past_key_values=self.cache,
+                             attention_mask=am.long(), position_ids=posn, use_cache=True, logits_to_keep=1)
+            self.cache = out.past_key_values
+            if idle:
+                self._restore_rec(idle, saved)
+                am[torch.tensor(idle, device=dev), -1] = False
+            self.mask = am
+            ro = m.readout()            # [B, E]: the state each row read its token in, before steering
+            logits = out.logits[:, -1, :]
+            self.last_logits = logits   # diagnostics
+            ro_l = ro.tolist()
+            draw = []                    # (row index, row, "write" | "begin")
+            for i, (r, k) in enumerate(zip(self.rows, kind)):
+                if k == "idle":
+                    continue
+                r.pos += 1
+                if k == "write":
+                    r.reply.append(feed[i])
+                    r.recent.append(feed[i])
+                    if r.on_token:
+                        info = r.next_info or {}
+                        r.on_token(r, {"id": feed[i], "t": self.tok.decode([feed[i]]), "p": round(info.get("p", 0.0), 4), "a": info.get("a", []),
+                                       "e": [round(x, 3) for x in ro_l[i]], "steer": dict(r.steer)})
+                    draw.append((i, r, "write"))
+                elif k == "read" and not r.force and r.after == "write":
+                    draw.append((i, r, "begin"))
+            if draw:
+                got = self._sample_many([r for _, r, _ in draw], logits[torch.tensor([i for i, _, _ in draw], device=dev)])
+                for (i, r, what), (t, info) in zip(draw, got):
+                    if what == "begin":
+                        r.reply, r.writing = [], True
+                        if t in self.stops:
+                            self._end(r, t)
+                        else:
+                            r.next_id, r.next_info = t, info
+                        continue
+                    tail = self.tok.decode(r.reply[-4:], skip_special_tokens=True)
+                    sentence_end = tail.rstrip().endswith((".", "!", "?", '."', '!"', '?"'))
+                    if t in self.stops or len(r.reply) >= r.max_new or (len(r.reply) >= r.soft and sentence_end):
+                        self._end(r, t)
+                    else:
+                        r.next_id, r.next_info = t, info
+            self.steps += 1
+            if self.mask.shape[1] > self.compact_at or self.steps % 500 == 0:
+                self._compact()
+            return True
+
+    def _save_rec(self, idx):
+        ix = torch.tensor(idx, device=self.mind.device)
+        return [[(n, i, t.index_select(0, ix).clone()) for n, i, t in _layer_tensors(layer)[1]] for layer in self.cache.layers]
+
+    def _restore_rec(self, idx, saved):
+        ix = torch.tensor(idx, device=self.mind.device)
+        for layer, keep in zip(self.cache.layers, saved):
+            for n, i, t in keep:
+                getattr(layer, n)[i].index_copy_(0, ix, t)
+
+    # ------------------------------------------------------------------ the loop
+    def run(self, stop: threading.Event):
+        """Step until stopped, at most step_rate steps a second (each android talks at this pace)."""
+        while not stop.is_set():
+            t0 = time.time()
+            busy = self.step()
+            dt = time.time() - t0
+            if busy:
+                self.t_step = 0.9 * self.t_step + 0.1 * dt if self.t_step else dt
+            time.sleep(max(0.0 if busy else 0.05, 1.0 / self.step_rate - dt))

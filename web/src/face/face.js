@@ -409,6 +409,39 @@ vec3 seamPerturb(vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir) {
   return normalize(abs(fDet) * surf_norm - vGrad);
 }
 `;
+// marks on the skin (setLook): line patterns in the face's own box (q: 0..1 across the head), front of the face only
+const MARKS_GLSL = /* glsl */`
+uniform float uMarks; uniform vec3 uMarkColor; uniform float uMarkGlow; uniform vec3 uEyeMid; uniform float uEyeD;
+float mSeg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
+// p in eye-widths from the point between the eyes (+x: the face's left, our right; +y: up). eyes at (+-0.5, 0),
+// brows ~(+-0.5, 0.45), nose tip (0, -0.56), mouth (0, -1.15)
+float faceMarks(vec3 pos) {
+  vec2 p = (pos.xy - uEyeMid.xy) / uEyeD;
+  float front = smoothstep(0.0, 0.03, pos.z - uEyeMid.z + 0.075);
+  float d = 1e3, w = 0.02;
+  if (uMarks < 1.5) {          // kintsugi: a crack down from the hairline, and one under the right eye down the cheek
+    d = min(d, mSeg(p, vec2(0.10, 1.60), vec2(0.26, 1.18))); d = min(d, mSeg(p, vec2(0.26, 1.18), vec2(0.17, 0.86)));
+    d = min(d, mSeg(p, vec2(0.26, 1.18), vec2(0.47, 1.06)));
+    d = min(d, mSeg(p, vec2(-0.55, -0.34), vec2(-0.70, -0.74))); d = min(d, mSeg(p, vec2(-0.70, -0.74), vec2(-0.60, -1.10)));
+    d = min(d, mSeg(p, vec2(-0.60, -1.10), vec2(-0.74, -1.46))); d = min(d, mSeg(p, vec2(-0.70, -0.74), vec2(-0.95, -0.86)));
+    w = 0.018;
+  } else if (uMarks < 2.5) {   // a scar across the left cheek
+    d = mSeg(p, vec2(0.42, -0.28), vec2(0.86, -0.98)); w = 0.026;
+  } else if (uMarks < 3.5) {   // tally marks under the left eye, struck through
+    for (int i = 0; i < 4; i++) { float x = 0.34 + 0.10 * float(i); d = min(d, mSeg(p, vec2(x, -0.30), vec2(x, -0.52))); }
+    d = min(d, mSeg(p, vec2(0.27, -0.49), vec2(0.73, -0.33))); w = 0.014;
+  } else {                     // circuit traces on the right temple
+    d = min(d, mSeg(p, vec2(-1.00, 1.05), vec2(-0.62, 1.05))); d = min(d, mSeg(p, vec2(-0.62, 1.05), vec2(-0.62, 0.78)));
+    d = min(d, mSeg(p, vec2(-0.98, 0.88), vec2(-0.80, 0.88))); d = min(d, mSeg(p, vec2(-0.80, 0.88), vec2(-0.80, 0.62)));
+    d = min(d, mSeg(p, vec2(-0.40, 1.22), vec2(-0.40, 0.95)));
+    d = min(d, length(p - vec2(-0.62, 0.78)) - 0.03); d = min(d, length(p - vec2(-0.80, 0.62)) - 0.03); d = min(d, length(p - vec2(-0.40, 0.95)) - 0.03);
+    w = 0.016;
+  }
+  float fw = max(fwidth(d), 1e-5);
+  return front * (1.0 - smoothstep(w - fw, w + fw, d));
+}
+`;
+
 
 const EYE_PARS = /* glsl */`
 uniform vec3 uIrisColor;
@@ -543,6 +576,7 @@ export class AndroidFace {
     this.pupil = { x: 0.34, v: 0 };
     this.irisColor = new THREE.Color('#7fe7ff');
     this.irisGlow = 1.0;
+    this.sleep = { x: 0, v: 0, target: 0 };   // 0 awake .. 1 asleep (setSleep): eyes shut, slow deep breaths, head down
 
     this._tmpV = new THREE.Vector3();
     this._tmpV2 = new THREE.Vector3();
@@ -574,12 +608,16 @@ export class AndroidFace {
       uFoldRight: { value: new THREE.Vector4() }, uFoldEye: { value: new THREE.Vector4() },
       uAU: { value: new THREE.Vector4() }, uAU2: { value: new THREE.Vector4() }, uAU3: { value: new THREE.Vector4() },
       uDetail: { value: new THREE.Vector2(1, 1) }, uCreaseDepth: { value: 0.00032 },
+      // marks (setLook): 0 none, 1 kintsugi (gold-filled cracks), 2 scar, 3 tally marks, 4 circuit lines
+      uMarks: { value: 0 }, uMarkColor: { value: new THREE.Color(0.85, 0.62, 0.22) }, uMarkGlow: { value: 0 },
+      uEyeMid: { value: new THREE.Vector3(0, 0.0357, 0.0803) }, uEyeD: { value: 0.0624 },
     };
 
     model.traverse((o) => {
       if (o.isMesh) {
         const role = o.material.userData.role;
         if (role === 'porcelain') {
+          this._skinMesh = o;
           const idx = o.material.userData.seamTexture;
           o.material = this._porcelainMaterial();
           if (idx !== undefined && !this._seamLoading) {
@@ -637,6 +675,12 @@ export class AndroidFace {
     // anchor between the eyes (for framing and gaze math)
     this.anchor = new THREE.Object3D();
     this.anchor.name = 'FaceAnchor';
+    if (this._skinMesh) {   // the marks are laid out from the eyes, in the skin mesh's own space
+      this.root.updateMatrixWorld(true);
+      const w0 = this._skinMesh.worldToLocal(this.eyes[0].pivot.getWorldPosition(new THREE.Vector3()));
+      const w1 = this._skinMesh.worldToLocal(this.eyes[1].pivot.getWorldPosition(new THREE.Vector3()));
+      this.uniforms.uEyeMid.value.copy(w0).add(w1).multiplyScalar(0.5); this.uniforms.uEyeD.value = w0.distanceTo(w1);
+    }
     const eL = this.eyes[0].pivot.position, eR = this.eyes[1].pivot.position;
     this.anchor.position.copy(eL).add(eR).multiplyScalar(0.5);
     this.headBone.add(this.anchor);
@@ -666,7 +710,7 @@ export class AndroidFace {
         .replace('#include <morphtarget_vertex>', `#include <morphtarget_vertex>
           transformed += labCorrective(position);`);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\n' + PORCELAIN_PARS + NATURAL_FOLDS_GLSL)
+        .replace('#include <common>', '#include <common>\n' + PORCELAIN_PARS + NATURAL_FOLDS_GLSL + MARKS_GLSL)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float sDist = seamDist(vSeamUv);
           float sStr = uHasSeams * smoothstep(-0.02, 0.03, vObjPos.z);  // fade seams out toward the back of the head
@@ -675,6 +719,8 @@ export class AndroidFace {
           float sLip = (1.0 - smoothstep(0.0, uSeamWidth * 1.6 + sFw, sDist)) * sStr;
           diffuseColor.rgb *= mix(1.0, uSeamDark, sCore);
           diffuseColor.rgb *= mix(1.0, 0.9, sLip);
+          float mk = uMarks > 0.5 ? faceMarks(vObjPos) : 0.0;
+          diffuseColor.rgb = mix(diffuseColor.rgb, uMarkColor, mk);
           float cH = creaseH(vObjPos);
           // Legacy mode retained for comparison. Natural mode has NO ink/albedo stroke.
           diffuseColor.rgb *= 1.0 - (1.0-uNaturalFolds)*0.28*clamp(cH,0.0,1.0);
@@ -690,7 +736,7 @@ export class AndroidFace {
         `)
         .replace('#include <clearcoat_normal_fragment_begin>', '#include <clearcoat_normal_fragment_begin>\n#ifdef USE_CLEARCOAT\nclearcoatNormal = normal;\n#endif')
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-          totalEmissiveRadiance += uGlowColor * uGlow * sCore;`)
+          totalEmissiveRadiance += uGlowColor * uGlow * sCore + uMarkColor * uMarkGlow * mk;`)
         .replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(
           'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
           `{ float wNL = saturate((dot(geometryNormal, directLight.direction) + uWrap) / (1.0 + uWrap));
@@ -916,6 +962,43 @@ export class AndroidFace {
     if (Number.isFinite(correctives)) this.uniforms.uDetail.value.x = clamp(correctives, 0, 1.5);
     if (Number.isFinite(wrinkles)) this.uniforms.uDetail.value.y = clamp(wrinkles, 0, 1.5);
   }
+  /** The android's look: skin 'porcelain' | 'chrome' | 'matte' (matte black) | 'glass'; eye colour (CSS colour);
+   *  marks 'none' | 'kintsugi' | 'scar' | 'tally' | 'circuit'. Unset fields keep their value. */
+  setLook({ skin, eye, marks } = {}) {
+    this.look = { ...(this.look || { skin: 'porcelain', eye: '#7fe7ff', marks: 'none' }), ...Object.fromEntries(Object.entries({ skin, eye, marks }).filter(([, v]) => v != null)) };
+    const L = this.look, U = this.uniforms;
+    if (eye) this.setIrisColor(eye);
+    if (!U) return;
+    const SK = {
+      porcelain: { color: [0.93, 0.905, 0.868], roughness: 0.4, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.075, sheen: 0.25, transmission: 0, sss: 0.55, wrap: 0.45, seamDark: 0.28 },
+      chrome: { color: [0.86, 0.87, 0.9], roughness: 0.13, metalness: 1, clearcoat: 1, clearcoatRoughness: 0.03, sheen: 0, transmission: 0, sss: 0, wrap: 0.05, seamDark: 0.15 },
+      matte: { color: [0.055, 0.055, 0.062], roughness: 0.72, metalness: 0, clearcoat: 0.12, clearcoatRoughness: 0.5, sheen: 0.55, transmission: 0, sss: 0.08, wrap: 0.3, seamDark: 0.5 },
+      glass: { color: [0.62, 0.76, 0.9], roughness: 0.07, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, sheen: 0, transmission: 0, iridescence: 1, sss: 0.1, wrap: 0.3, seamDark: 0.4 },
+    }[L.skin] || null;
+    if (SK) for (const m of this._porcelainMats || []) {
+      m.color.setRGB(...SK.color); m.roughness = SK.roughness; m.metalness = SK.metalness; m.clearcoat = SK.clearcoat;
+      m.clearcoatRoughness = SK.clearcoatRoughness; m.sheen = SK.sheen; m.transmission = SK.transmission;
+      m.iridescence = SK.iridescence || 0; m.iridescenceIOR = 1.45; m.iridescenceThicknessRange = [180, 520];   // glass: a clear, oil-sheen finish
+      m.needsUpdate = true;
+    }
+    if (SK) { U.uSSS.value.setRGB(1.0, 0.62, 0.45).multiplyScalar(SK.sss); U.uWrap.value = SK.wrap; U.uSeamDark.value = SK.seamDark; }
+    const MK = { none: [0], kintsugi: [1, [0.86, 0.64, 0.24], 0.4], scar: [2, [0.32, 0.2, 0.2], 0], tally: [3, [0.12, 0.12, 0.14], 0], circuit: [4, [0.35, 0.85, 1.0], 2.0] }[L.marks] || [0];
+    U.uMarks.value = MK[0];
+    if (MK[1]) { U.uMarkColor.value.setRGB(...MK[1]); U.uMarkGlow.value = MK[2]; }
+  }
+
+  /** 0 awake .. 1 asleep: the eyes close, breathing slows and deepens, the head sinks, the eyes' light dims. */
+  setSleep(v = 1) { this.sleep.target = clamp(v); }
+
+  /** Woken with a start: a gasp, eyes and brows up, the head jerks back, then it settles awake. */
+  startle() {
+    const t = this.time, S = this.sleep;
+    S.target = 0; S.x = Math.min(S.x, 0.35); S.v = 0;
+    this.breath.gasp = true;
+    this.overlays = this.overlays.slice(-6);
+    this.overlays.push({ t0: t, a: 0.06, h: 0.35, r: 0.9, ch: { eyeWide: 0.7, browInnerUp: 0.45, browOuterUp: 0.55, jawOpen: 0.12 }, head: { pitch: 3.2, z: -0.006 } });
+  }
+
   setPorcelainMatte(on = false) {
     for (const m of this._porcelainMats || []) {
       m.roughness = on ? 0.68 : 0.4; m.clearcoat = on ? 0.12 : 1.0; m.clearcoatRoughness = on ? 0.45 : 0.075; m.needsUpdate = true;
@@ -1258,6 +1341,7 @@ export class AndroidFace {
     this.time = time ?? this.time + dt;
     const t = this.time;
     const idle = this.options.idle;
+    { const S = this.sleep; spring(S, S.target, S.target > S.x ? 0.6 : 5, dt); S.x = clamp(S.x); }   // falls asleep slowly, wakes fast
 
     // New relief take owns its release/breath until it completes or is interrupted.
     if(this.reliefTake) {
@@ -1515,8 +1599,9 @@ export class AndroidFace {
     for (const [side, k] of [['Left', 1], ['Right', 0.97]]) {
       const lid = this.out['eyeBlink' + side];
       const bk = B * k;
-      this.out['eyeBlink' + side] = lid + (1 - lid) * bk;
-      this.out['eyeWide' + side] *= 1 - bk;
+      const bks = Math.max(bk, 0.98 * this.sleep.x);   // asleep: the lids stay shut
+      this.out['eyeBlink' + side] = lid + (1 - lid) * bks;
+      this.out['eyeWide' + side] *= 1 - bks;
       // blink-coupled brow motion (a slight dip during closure) and lower-lid lift
       this.out['browDown' + side] += 0.07 * bk;
       this.out['eyeSquint' + side] += 0.12 * bk;
@@ -1576,10 +1661,10 @@ export class AndroidFace {
     // kinds: rest | sigh | speech | gasp (startle: sharp in-breath, held) | huff (anger: held, then forced out
     // through the nose) | shudder (sadness: the in-breath catches in steps)
     const startCycle = (kind = 'rest') => {
-      const rate = clamp(14 * (1 + 0.45 * ar) * (1 - 0.3 * (f.calm || 0)), 7, 24);       // breaths / min
+      const rate = clamp(14 * (1 + 0.45 * ar) * (1 - 0.3 * (f.calm || 0)), 7, 24) * (1 - 0.5 * this.sleep.x);       // breaths / min (asleep: slow)
       B.from = B.val;
       B.T = (60 / rate) * (0.82 + 0.36 * this.rand());                                // irregular cycles
-      B.depth = (0.8 + 0.4 * this.rand()) * (1 + 0.25 * Math.max(0, ar)) * (1 - 0.3 * fear);   // fear: shallow
+      B.depth = (0.8 + 0.4 * this.rand()) * (1 + 0.25 * Math.max(0, ar)) * (1 - 0.3 * fear) * (1 + 0.45 * this.sleep.x);   // fear: shallow; asleep: deep
       B.inhale = 0.36 + 0.06 * this.rand();
       B.hold = 0.06 * anger;                                                             // anger holds the chest
       if (kind === 'rest' && !this.writing) {
@@ -1862,6 +1947,7 @@ export class AndroidFace {
     }
     // writing: a slight downward inclination toward the text
     pitch -= 1.5 * W;
+    pitch -= 8 * this.sleep.x; roll += 2.5 * this.sleep.x;   // asleep: the head sinks and tips
     // head follows large gaze offsets (eye-head coordination)
     const [gy, gp] = this.gazeDesired || [0, 0];
     const follow = (a) => Math.sign(a) * Math.max(0, Math.abs(a) - 6 * DEG) * 0.4;
@@ -1951,7 +2037,7 @@ export class AndroidFace {
       u.uTime.value = t;
       u.uActivity.value = W;
       u.uPupil.value = this.pupil.x;
-      u.uIrisGlow.value = this.irisGlow * (1 + 0.12 * W + 0.05 * Math.sin(t * 1.3));
+      u.uIrisGlow.value = this.irisGlow * (1 + 0.12 * W + 0.05 * Math.sin(t * 1.3)) * (1 - 0.9 * this.sleep.x);
       // head up in eye-local space
       const inv = e.pivot.quaternion.clone().invert();
       u.uHeadUp.value.set(0, 1, 0).applyQuaternion(inv);

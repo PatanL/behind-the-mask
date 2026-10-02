@@ -1,0 +1,97 @@
+@import './style.css';
+.coin { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 18px; padding-top: 18px; max-width: 1360px; }
+.stage-col { position: sticky; top: 72px; align-self: start; }
+.stage { position: relative; height: calc(100vh - 150px); min-height: 460px; overflow: hidden; border: 1px solid var(--line); background: #03050b; }
+.stage canvas { width: 100%; height: 100%; display: block; }
+.asked { position: absolute; top: 14px; left: 16px; right: 16px; z-index: 3; padding: 9px 12px; background: rgba(127, 231, 255, 0.07); border: 1px solid var(--line2); font-size: 14px; color: var(--ink); }
+.sleep-note { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 3; padding: 8px 14px; background: rgba(3, 4, 10, 0.8); border: 1px solid var(--line2); font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink2); white-space: nowrap; }
+.feel { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.feel .feelbar { flex: 1; height: 6px; }
+.feel-label { font-size: 13px; color: var(--ink2); min-width: 160px; text-align: right; }
+.side { display: grid; gap: 12px; align-content: start; }
+.side h3 { margin: 0 0 12px; font-family: var(--mono); font-weight: 500; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cyan-d); }
+.side h3::before { content: '// '; color: var(--ink3); }
+.head .t1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.head h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: -0.02em; }
+.head .tk { color: var(--accent); }
+.head .status { margin-left: auto; }
+.head .t2 { color: var(--ink3); font-size: 13px; margin-top: 4px; }
+.price { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 6px; }
+.price .big { font-size: 22px; }
+.chart { width: 100%; height: 110px; display: block; }
+.kv { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 11.5px; color: var(--ink3); margin-top: 8px; }
+.kv b { display: block; color: var(--ink); font-size: 13px; font-weight: 600; }
+.demo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink3); }
+.demo span { flex-basis: 100%; }
+.demo .btn { padding: 6px 11px; font-size: 13px; }
+.ph { display: flex; align-items: baseline; gap: 10px; } .ph .mode { margin-left: auto; font-size: 12px; color: var(--ink3); }
+.taps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.tapb { --c: #7fe7ff; position: relative; overflow: hidden; padding: 11px 4px; border-radius: 3px; border: 1px solid color-mix(in srgb, var(--c) 42%, transparent);
+  background: color-mix(in srgb, var(--c) calc(6% + var(--heat, 0) * 28%), transparent); box-shadow: 0 0 calc(var(--heat, 0) * 22px) color-mix(in srgb, var(--c) 60%, transparent);
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; text-align: center; user-select: none; touch-action: manipulation; transition: box-shadow 0.2s; }
+.tapb:active { transform: scale(0.96); }
+.tapb.wide { grid-column: span 2; }
+.mix { display: flex; height: 6px; border-radius: 4px; overflow: hidden; background: rgba(255, 255, 255, 0.05); margin: 12px 0 6px; }
+.mix i { display: block; height: 100%; transition: width 0.5s; }
+.why { font-size: 12.5px; color: var(--ink3); line-height: 1.5; }
+.wallet { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12.5px; color: var(--ink2); }
+.wallet .btn { padding: 6px 12px; font-size: 13px; }
+.ask-box { display: grid; grid-template-rows: 54px 18px; gap: 6px; }
+.ask { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-self: center; }
+.ask-card { box-sizing: border-box; height: 54px; padding: 7px 12px; border-radius: 3px; border: 1px solid var(--line); background: rgba(159, 180, 255, 0.06); display: grid; grid-template-rows: 20px 16px; gap: 3px; overflow: hidden; }
+.ask-card.now { border-color: rgba(159, 180, 255, 0.55); background: rgba(159, 180, 255, 0.12); }
+.ask-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ask-pill { flex: none; padding: 1px 8px; border-radius: 2px; background: rgba(127, 231, 255, 0.12); color: var(--cyan); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+.ask-card.now .ask-pill { background: var(--accent); color: var(--bg); }
+.ask-q { min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-why, .ask-line { font-size: 12.5px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ask-line.warn { color: #ffb4a8; }
+.char p { margin: 0 0 12px; color: var(--ink2); font-family: var(--display); font-size: 15px; line-height: 1.55; }
+.kv2 { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+.kv2 dt { color: var(--ink3); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; padding-top: 2px; } .kv2 dd { margin: 0; color: var(--ink); }
+.clips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.clips a { display: block; border-radius: 3px; overflow: hidden; border: 1px solid var(--line); font-size: 12px; color: var(--ink2); }
+.clips video, .clips img { width: 100%; display: block; aspect-ratio: 1; object-fit: cover; background: #000; }
+@media (max-width: 980px) {
+  .coin { grid-template-columns: 1fr; }
+  .stage-col { position: static; }
+  .stage { height: 62vh; min-height: 380px; }
+}
+
+/* the android's words: the Steer AI exhibit's subtitles (web/src/speech.js) -- a fixed box of three lines in the serif,
+   newest at the bottom, older lines rising and fading out of the top; each word tinted and glowing in the colour of the
+   feeling it carries, by how strongly the model shows it there */
+@import '@fontsource/fraunces/400.css';
+.subs { position: absolute; z-index: 4; left: 50%; bottom: 3%; transform: translateX(-50%); width: min(92%, 1040px); pointer-events: none; }
+.speech-label { height: 18px; margin-bottom: 8px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink2); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 8px #03040a, 0 0 2px #03040a; }
+.speech { --lines: 3; height: calc(1.38em * var(--lines)); display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+  font-family: 'Fraunces', Georgia, serif; font-size: clamp(22px, 2.1vw, 36px); line-height: 1.38; letter-spacing: -0.01em; text-align: center; color: #eef0f7;
+  text-shadow: 0 2px 14px rgba(3, 4, 10, 0.9); -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em); mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em); }
+.speech-text { flex: none; }
+.tok { transition: color 0.6s ease, text-shadow 0.6s ease; }
+.tok.new { animation: tokin 0.5s ease-out both; }
+@keyframes tokin { from { opacity: 0; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
+.tok.old { opacity: 0.7; }
+.caret { display: inline-block; width: 0.08em; height: 1em; vertical-align: -0.12em; margin-left: 2px; background: var(--ink2); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tok.new { animation: none; } }
+
+/* the exhibit's "how it feels inside" wheel, on the right of the stage */
+.inside-r { position: absolute; top: 3%; right: 2.5%; z-index: 3; width: 200px; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.wheel { width: 200px; height: 200px; overflow: visible; }
+.wheel text { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+@media (max-width: 980px) { .inside-r { width: 140px; top: 2%; right: 1%; } .wheel { width: 140px; height: 140px; } }
+@media (max-width: 560px) { .inside-r { width: 104px; } .wheel { width: 104px; height: 104px; } .wheel text { display: none; } .inside-r .lbl { display: none; } }
+
+.nocoin { margin-top: 12px; padding: 10px 12px; border: 1px dashed var(--line2); font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; color: var(--ink2); }
+/* the landing page: the flagship, with an intro above and a launch band below */
+.intro { max-width: 1360px; margin: 0 auto; padding: 26px 28px 0; }
+.intro h1 { margin: 8px 0 8px; font-family: var(--display); font-weight: 600; font-size: clamp(28px, 3.6vw, 46px); letter-spacing: -0.025em; line-height: 1.05; }
+.intro h1 em { font-style: normal; color: var(--cyan); text-shadow: 0 0 26px rgba(127, 231, 255, 0.4); }
+.intro p { margin: 0; color: var(--ink2); max-width: 760px; line-height: 1.6; }
+.band { max-width: 1360px; margin: 36px auto 0; padding: 26px 28px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(127, 231, 255, 0.05), transparent); }
+.band h2 { margin: 6px 0 6px; font-family: var(--display); font-weight: 600; font-size: 28px; letter-spacing: -0.02em; }
+.band p { margin: 0; color: var(--ink2); max-width: 680px; line-height: 1.6; }
+.band .ctas { display: flex; gap: 10px; flex-wrap: wrap; }
