@@ -37,12 +37,13 @@ SETTINGS = Path(os.environ.get("LP_STATE", "runs/launchpad")) / "pump.json"
 
 
 def settings() -> dict:
-    """The treasury (every coin's creator: its fees) and the address lookup table launches use. Env overrides the file."""
+    """The server's settings file: the treasury (every coin's creator: its fees), the address lookup table launches use,
+    and capacity (max_alive, slots, min_slots, max_slots). Env overrides the treasury and the table."""
     try:
         d = json.loads(SETTINGS.read_text())
     except (OSError, ValueError):
         d = {}
-    return {"treasury": os.environ.get("LP_TREASURY") or d.get("treasury") or "", "alt": os.environ.get("LP_ALT") or d.get("alt") or ""}
+    return {**d, "treasury": os.environ.get("LP_TREASURY") or d.get("treasury") or "", "alt": os.environ.get("LP_ALT") or d.get("alt") or ""}
 
 
 def curve_address(mint: str) -> str:

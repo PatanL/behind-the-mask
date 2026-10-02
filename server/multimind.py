@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import collections
 import threading
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -67,8 +68,19 @@ def _layer_tensors(layer):
     return att, rec
 
 
+PROFILE = os.environ.get("LP_PROFILE") == "1" or os.path.exists("runs/launchpad/profile")   # (touch that file to time steps)
+
+
+def _tick() -> float:
+    """A timestamp; when profiling, after the GPU has caught up (so each part's time is its own)."""
+    if PROFILE and torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.time()
+
+
 class MultiMind:
     def __init__(self, mind: Mind, step_rate: float = 7.0, compact_at: int = 9000):
+        self.parts: dict = {}
         self.mind, self.model, self.tok = mind, mind.model, mind.tokenizer
         mind.install()
         t = self.tok
@@ -181,6 +193,7 @@ class MultiMind:
                     setattr(layer, n, x[:, :, first:].contiguous())
             self.mask = self.mask[:, first:]
         if self.mask.shape[1] <= self.compact_at:
+            torch.cuda.empty_cache()   # hand freed blocks back (GPU memory is the machine's memory here)
             return
         dev, T2 = self.mind.device, int(self.mask.sum(1).max())
         for layer in self.cache.layers:
@@ -260,6 +273,7 @@ class MultiMind:
         with self.lock:
             if not self.rows or all(r.idle for r in self.rows):
                 return False
+            t_in = _tick()
             m, dev, B = self.mind, self.mind.device, len(self.rows)
             feed, kind = [], []
             for r in self.rows:
@@ -276,6 +290,7 @@ class MultiMind:
             am = torch.cat([self.mask, torch.ones(B, 1, dtype=torch.bool, device=dev)], 1)
             posn = torch.tensor([[r.pos] for r in self.rows], device=dev)
             m.set_coef(self._coef(self.rows))
+            tp = _tick()
             out = self.model(torch.tensor([[t] for t in feed], device=dev), past_key_values=self.cache,
                              attention_mask=am.long(), position_ids=posn, use_cache=True, logits_to_keep=1)
             self.cache = out.past_key_values
@@ -284,6 +299,7 @@ class MultiMind:
                 am[torch.tensor(idle, device=dev), -1] = False
             self.mask = am
             ro = m.readout()            # [B, E]: the state each row read its token in, before steering
+            tf = _tick()
             logits = out.logits[:, -1, :]
             self.last_logits = logits   # diagnostics
             ro_l = ro.tolist()
@@ -302,6 +318,7 @@ class MultiMind:
                     draw.append((i, r, "write"))
                 elif k == "read" and not r.force and r.after == "write":
                     draw.append((i, r, "begin"))
+            ts = _tick()
             if draw:
                 got = self._sample_many([r for _, r, _ in draw], logits[torch.tensor([i for i, _, _ in draw], device=dev)])
                 for (i, r, what), (t, info) in zip(draw, got):
@@ -318,6 +335,11 @@ class MultiMind:
                         self._end(r, t)
                     else:
                         r.next_id, r.next_info = t, info
+            te = _tick()
+            if PROFILE:   # where a step's time goes (ms, smoothed): before the model, the model, reading out + callbacks, sampling
+                for k, v in (("prep", tp - t_in), ("model", tf - tp), ("tokens", ts - tf), ("sample", te - ts)):
+                    self.parts[k] = 0.9 * self.parts.get(k, v * 1000) + 0.1 * v * 1000
+                self.parts["rows"] = B; self.parts["cache"] = self.mask.shape[1]
             self.steps += 1
             if self.mask.shape[1] > self.compact_at or self.steps % 500 == 0:
                 self._compact()

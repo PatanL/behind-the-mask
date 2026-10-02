@@ -16,11 +16,16 @@ Visitors can also ask it questions (one global line per coin).
 """
 from __future__ import annotations
 
+import os
+# Every step each conversation's memory grows by a token, so the allocator keeps asking for blocks a little bigger than
+# the ones it just freed; without expandable segments those freed blocks pile up (on this machine GPU memory is the
+# system's memory: 16 androids lost ~12 GB in a minute). Must be set before torch starts CUDA.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import asyncio
 import base64
 import json
 import math
-import os
 import re
 import secrets
 import threading
@@ -40,7 +45,8 @@ import lp_wallet
 STATE = Path(os.environ.get("LP_STATE", "runs/launchpad"))
 DIRS = Path(os.environ.get("BTM_DIRS", "runs/q9b"))
 CHAT = os.environ.get("BTM_CHAT", "Qwen/Qwen3.5-9B")
-MAX_AWAKE = int(os.environ.get("LP_MAX_AWAKE", "8"))
+MAX_ALIVE = int(os.environ.get("LP_MAX_ALIVE", "100"))  # funded androids alive at once (face awake, chart as mood); pump.json "max_alive"
+SLOTS = int(os.environ.get("LP_SLOTS", "12"))           # of them, speaking at once to start with; adapts (slot_cap); pump.json "slots"
 PUSH_BUDGET = float(os.environ.get("LP_PUSH_BUDGET", "0.75"))
 # trading keeps an android awake: its coin's volume credits compute at the creator-fee rate (the platform pays the GPU)
 VOLUME_CREDIT = os.environ.get("LP_VOLUME_CREDIT", "1") == "1"
@@ -336,11 +342,32 @@ def prompt_ids(c: Coin, nudge: str, history: list | None = None) -> list[int]:
     return chat.tokenizer(s, add_special_tokens=False)["input_ids"]
 
 
-async def wake(c: Coin, startle=False):
-    from multimind import Row
-    if c.status != "asleep" or not c.ready or ENGINE["mm"] is None:
+# An android is alive while its coin is funded (up to MAX_ALIVE of them): its face is awake, its chart is its mood, a
+# trade startles it. Of those, the ones with a speaking slot talk: a row in the shared model's batch. Watched androids
+# (someone on their page) get slots first; the rest take turns, one thought each, while there are more than slots.
+# With few coins every alive android has a slot and talks all the time.
+
+def speaking(c: Coin) -> bool:
+    return ENGINE["mm"] is not None and ENGINE["mm"].row(c.id) is not None
+
+
+async def come_alive(c: Coin, startle=False):
+    """Funded again (or new): awake on its page and the grid, listening until it gets a slot."""
+    if c.status != "asleep" or not c.ready:
         return
-    c.status, c.awake_since = "waking", time.time()
+    c.status, c.awake_since = "listening", time.time()
+    c.spoke_at = getattr(c, "spoke_at", None) or time.time()   # (its wait for a turn counts from now)
+    await broadcast_coin(c, {"type": "wake", "startle": startle})
+
+
+async def give_slot(c: Coin):
+    """It starts speaking: its prompt (its character, its last exchanges) is read into the batch."""
+    from multimind import Row
+    if c.status != "listening" or not c.ready or ENGINE["mm"] is None or speaking(c):
+        return
+    if memory().get("available", 99) < 6:   # never run the machine out of memory: speaking can wait
+        return
+    c.status, c.spoke_at = "waking", time.time()
     opening = f"{people(len(c.clients))} Introduce yourself to them, then talk about whatever is on your mind."
     nudge = opening if not c.history else FOLLOWS[0]
     ids = prompt_ids(c, (f"{people(len(c.clients))} " if c.history else "") + nudge, c.history[-2:])
@@ -349,21 +376,32 @@ async def wake(c: Coin, startle=False):
     row.on_token = lambda r, tok, c=c: LOOP.call_soon_threadsafe(on_token, c, tok)
     row.on_end = lambda r, text, c=c: LOOP.call_soon_threadsafe(on_end, c, text)
     c.turn = {"id": secrets.token_hex(4), "tokens": [], "asked": None, "start": time.time(), "nudge": nudge}
+    c.yield_after_turn = False
     await job(lambda: ENGINE["mm"].add(row, ids))
+    if c.status != "waking":   # put to sleep meanwhile
+        await job(lambda: ENGINE["mm"].remove(c.id))
+        return
     c.status = "awake"
-    await broadcast_coin(c, {"type": "wake", "startle": startle})
     await broadcast_coin(c, {"type": "begin", "id": c.turn["id"], "asked": None})
+
+
+async def take_slot(c: Coin, status: str = "listening"):
+    """It stops speaking (its turn is over and others are waiting, or it went to sleep): off the batch."""
+    if speaking(c):
+        await job(lambda: ENGINE["mm"].remove(c.id))
+    if c.turn and c.turn["tokens"]:
+        log_turn(c)
+    c.turn, c.spoke_at = None, time.time()
+    if c.status != "asleep":
+        c.status = status
+    await broadcast_coin(c, {"type": "rest" if status == "listening" else "sleep"})
 
 
 async def sleep(c: Coin):
     if c.status == "asleep":
         return
+    await take_slot(c, status="asleep")
     c.status = "asleep"
-    await job(lambda: ENGINE["mm"].remove(c.id))
-    if c.turn and c.turn["tokens"]:
-        log_turn(c)
-    c.turn = None
-    await broadcast_coin(c, {"type": "sleep"})
 
 
 def on_token(c: Coin, tok: dict):
@@ -408,6 +446,9 @@ async def end_turn(c: Coin, text: str):
     c.asking = None
     if c.status == "asleep":
         return
+    if getattr(c, "yield_after_turn", False) and not c.questions:   # others are owed a turn (it finishes its questions first)
+        await take_slot(c)
+        return
     c.status = "thinking"
     await asyncio.sleep(0.8)
     if c.status == "asleep":
@@ -437,10 +478,9 @@ async def next_turn(c: Coin):
     if c.short >= 2 or row.pos > CTX_LIMIT:
         # memory full: a fresh start with the last two exchanges as context; replies collapsing: a clean start
         collapsed, c.short = c.short >= 2, 0
-        await job(lambda: mm.remove(c.id))
-        c.status = "asleep"
+        await take_slot(c)
         c.history = [] if collapsed else c.history[-2:]
-        await wake(c)
+        await give_slot(c)
         return
     c.turn = {"id": secrets.token_hex(4), "tokens": [], "asked": c.asking["q"] if c.asking else None, "start": time.time(), "nudge": nudge}
     ids = ENGINE["chat"].tokenizer(TURN.format(nudge=nudge), add_special_tokens=False)["input_ids"]
@@ -474,7 +514,7 @@ async def heartbeat():
             trades = c.market.tick(now)
             for tr in trades:
                 await broadcast_coin(c, {"type": "trade", **{k: tr[k] for k in ("side", "sol", "price", "t")}})
-            if c.status != "asleep" and not c.d.get("featured"):
+            if speaking(c) and not c.d.get("featured"):
                 c.d["ledger"]["spent_sol"] += COST_SOL_HOUR / 3600 * 0.5
             c.steer = c.mix() if c.d.get("mu") is not None else {}
             row = ENGINE["mm"].row(c.id)
@@ -494,22 +534,118 @@ async def heartbeat():
                 c.save()
 
 
+SLOT = {"cap": None, "checked": 0.0}
+
+
+def slot_cap() -> int:
+    """How many may speak at once: SLOTS to start; every 10 s one fewer when a step runs slow (under ~4 words a second
+    each) or memory runs low, one more when there's room and demand (between pump.json "min_slots" / "max_slots")."""
+    st = lp_pump.settings()
+    lo, hi = int(st.get("min_slots") or 4), int(st.get("max_slots") or 24)
+    if SLOT["cap"] is None:
+        SLOT["cap"] = int(st.get("slots") or SLOTS)
+    now, mm = time.time(), ENGINE["mm"]
+    if mm is not None and now - SLOT["checked"] > 10:
+        SLOT["checked"] = now
+        t, mem = mm.t_step or 0.0, memory().get("available", 99)
+        if t > 0.25 or mem < 8:
+            SLOT["cap"] -= 1
+        elif t < 0.17 and mem > 16 and len(mm.rows) >= SLOT["cap"]:
+            SLOT["cap"] += 1
+    SLOT["cap"] = max(lo, min(hi, SLOT["cap"]))
+    return SLOT["cap"]
+
+
 async def schedule():
-    """Who is awake: the funded coins, the featured first, then by recent volume; at most MAX_AWAKE."""
+    """Who is alive (the funded coins, the featured first, then by recent volume; at most MAX_ALIVE), and of them who
+    speaks: by viewers and by how long each has waited (see score)."""
+    st = lp_pump.settings()
     funded = [c for c in COINS.values() if c.ready and (c.d.get("featured") or c.balance() > 0)]
     funded.sort(key=lambda c: (not c.d.get("featured"), -c.market.volume_sol, -c.balance()))
-    want = {c.id for c in funded[:MAX_AWAKE]}
+    alive = funded[:int(st.get("max_alive") or MAX_ALIVE)]
+    ids = {c.id for c in alive}
     for c in list(COINS.values()):
-        if c.status != "asleep" and c.id not in want:
+        if c.id not in ids and c.status != "asleep":
             await sleep(c)
-    for c in funded[:MAX_AWAKE]:
+    for c in alive:
         if c.status == "asleep":
-            await wake(c, startle=bool(getattr(c, "woken_by_trade", False)))
+            await come_alive(c, startle=bool(getattr(c, "woken_by_trade", False)))
             c.woken_by_trade = False
+    cap = slot_cap()
+    now = time.time()
+    # who should speak: viewers count (with diminishing returns), and so does waiting; one viewer is worth 90 s of
+    # waiting, a hundred about ten minutes, so busy pages keep talking while quiet ones still get their turn
+    # (demo coins only get the slots real coins leave)
+    score = lambda c: ((1e6 if c.d.get("featured") else 0) - (1e7 if c.market.kind == "sim" else 0)
+                       + 90 * math.log2(1 + len(c.clients)) + (0.0 if speaking(c) else now - getattr(c, "spoke_at", 0.0)))
+    order = sorted(alive, key=score, reverse=True)
+    want = set(x.id for x in order[:cap])
+    talking = [c for c in order if speaking(c)]
+    for c in reversed(talking[cap:]):     # the cap shrank: the least wanted stop now
+        await take_slot(c)
+        talking.remove(c)
+    for c in talking:
+        c.yield_after_turn = c.id not in want
+    free = cap - len(talking)
+    for c in order[:cap]:
+        if speaking(c) or c.status != "listening":
+            continue
+        if free > 0:
+            await give_slot(c)
+            free -= 1
+        elif c.clients:   # someone is watching it and every slot is busy: an unwatched speaker stops now
+            v = next((x for x in reversed(talking) if not x.clients and x.id not in want), None)
+            if v:
+                await take_slot(v)
+                talking.remove(v)
+                await give_slot(c)
 
 
 # ---------------------------------------------------------------------------------------------- talking to pages
+class Out:
+    """One page's socket: what it's sent goes through its own queue and writer, so a slow viewer never holds up the
+    others (or the clock). One that falls too far behind is closed; its page reconnects and catches up."""
+
+    def __init__(self, ws: WebSocket):
+        self.ws, self.q, self.dead = ws, asyncio.Queue(maxsize=300), False
+        self.task = asyncio.ensure_future(self.run())
+
+    def put(self, data: str):
+        if self.dead:
+            return
+        try:
+            self.q.put_nowait(data)
+        except asyncio.QueueFull:
+            self.close()
+
+    async def run(self):
+        try:
+            while True:
+                await self.ws.send_text(await self.q.get())
+        except Exception:  # noqa: BLE001
+            self.dead = True
+
+    def close(self):
+        if not self.dead:
+            self.dead = True
+            self.task.cancel()
+            asyncio.ensure_future(self._close())
+
+    async def _close(self):
+        try:
+            await self.ws.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+OUT: dict = {}   # ws -> Out
+
+
 async def send(ws: WebSocket, msg: dict):
+    o = OUT.get(ws)
+    if o:
+        o.put(json.dumps(msg))
+        return
     try:
         await ws.send_text(json.dumps(msg))
     except Exception:  # noqa: BLE001
@@ -517,12 +653,15 @@ async def send(ws: WebSocket, msg: dict):
 
 
 async def broadcast_coin(c: Coin, msg: dict):
+    if not c.clients:
+        return
     data = json.dumps(msg)
     for ws in list(c.clients):
-        try:
-            await ws.send_text(data)
-        except Exception:  # noqa: BLE001
+        o = OUT.get(ws)
+        if o is None or o.dead:
             c.clients.pop(ws, None)
+        else:
+            o.put(data)
 
 
 async def flush_words(c: Coin):
@@ -543,22 +682,54 @@ def coin_state(c: Coin, cid: str | None = None) -> dict:
     return s
 
 
+STATIC = ("id", "name", "ticker", "look", "mu", "featured", "created", "model", "concept", "temperament", "market", "img")
+
+
+def live_fields(s: dict) -> dict:
+    """The parts of a coin's summary that change, rounded (an explore update carries only these)."""
+    r = lambda x, n: None if x is None else round(x, n)
+    return {"id": s["id"], "status": s["status"], "line": s["line"], "e": s["e"], "price": float(f"{s['price']:.4g}") if s["price"] else s["price"],
+            "mcap_sol": r(s["mcap_sol"], 2), "change_5m": r(s["change_5m"], 3), "change_1h": r(s["change_1h"], 3), "volume_sol": r(s["volume_sol"], 2),
+            "curve": r(s["curve"], 3), "time_left": None if s["time_left"] is None else int(s["time_left"] // 10 * 10), "viewers": s["viewers"],
+            "intensity": r(s["intensity"], 2)}
+
+
 async def explore_loop():
+    """Every explore page: the full list when it connects, then each second (every 2 s past 200 explore pages) only the
+    coins and fields that changed, as absolute values (so a page that joined between updates can't go wrong)."""
+    last: dict = {}   # demo flag -> {id: live fields as last sent}
     while True:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.0 if len(EXPLORE) < 200 else 2.0)
         if not EXPLORE:
+            last.clear()
             continue
-        data = {d: json.dumps({"type": "coins", "coins": [c.summary() for c in listed(d)], "stats": stats(d)}) for d in set(EXPLORE.values())}
-        for ws, d in list(EXPLORE.items()):
-            try:
-                await ws.send_text(data[d])
-            except Exception:  # noqa: BLE001
-                EXPLORE.pop(ws, None)
+        for d in set(EXPLORE.values()):
+            cs = {c.id: c.summary() for c in listed(d)}
+            prev, now_, changed, added = last.get(d, {}), {}, [], []
+            for cid, sm in cs.items():
+                lf = live_fields(sm)
+                now_[cid] = lf
+                if cid not in prev:
+                    added.append(sm)
+                elif lf != prev[cid]:
+                    changed.append({k: v for k, v in lf.items() if k == "id" or prev[cid].get(k) != v})
+            gone = [cid for cid in prev if cid not in cs]
+            last[d] = now_
+            if not (changed or added or gone):
+                continue
+            data = json.dumps({"type": "delta", "c": changed, "add": added, "gone": gone, "stats": stats(d)})
+            for ws, dd in list(EXPLORE.items()):
+                if dd == d:
+                    o = OUT.get(ws)
+                    if o is None or o.dead:
+                        EXPLORE.pop(ws, None)
+                    else:
+                        o.put(data)
 
 
 async def state_loop():
     while True:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.0 if sum(len(c.clients) for c in COINS.values()) < 500 else 2.0)
         for c in COINS.values():
             if c.clients:
                 await broadcast_coin(c, coin_state(c))
@@ -606,7 +777,25 @@ async def startup():
 @app.get("/api/status")
 def api_status():
     return {"ready": not ENGINE["loading"] and ENGINE["error"] is None, "error": ENGINE["error"], **stats(),
-            "step_ms": round(ENGINE["mm"].t_step * 1000) if ENGINE["mm"] and ENGINE["mm"].t_step else None}
+            "step_ms": round(ENGINE["mm"].t_step * 1000) if ENGINE["mm"] and ENGINE["mm"].t_step else None,
+            "step_parts": {k: round(v, 1) for k, v in ENGINE["mm"].parts.items()} if ENGINE["mm"] and ENGINE["mm"].parts else None,
+            "memory": memory()}
+
+
+def memory() -> dict:
+    """The machine's available memory and what the model's allocator holds (GB)."""
+    out = {}
+    try:
+        out["available"] = round(next(int(l.split()[1]) for l in open("/proc/meminfo") if l.startswith("MemAvailable")) / 1048576, 1)
+    except (OSError, StopIteration, ValueError):
+        pass
+    try:
+        import torch
+        if torch.cuda.is_available():
+            out["allocated"], out["reserved"] = round(torch.cuda.memory_allocated() / 2**30, 1), round(torch.cuda.memory_reserved() / 2**30, 1)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 @app.get("/api/coins")
@@ -647,11 +836,12 @@ def launch_source(f: dict, req: Request) -> str:
     return str(f.get("creator") or req.headers.get("x-forwarded-for", "").split(",")[0].strip() or (req.client.host if req.client else "?"))
 
 
-async def gate(f: dict, req: Request, name: str, persona: str, concept: str):
-    """Before anything is created (on pump.fun or here): the launch rate limits, then the character's moderation."""
+async def gate(f: dict, req: Request, name: str, persona: str, concept: str, demo: bool = False):
+    """Before anything is created (on pump.fun or here): the launch rate limits (not for demo coins, which only this
+    machine and the private test site can make), then the character's moderation."""
     now, src = time.time(), launch_source(f, req)
     LAUNCH_LOG[:] = [x for x in LAUNCH_LOG if now - x[0] < 3600]
-    if len(LAUNCH_LOG) >= LAUNCHES_PER_HOUR or sum(1 for _, s_ in LAUNCH_LOG if s_ == src) >= LAUNCHES_PER_SOURCE:
+    if not demo and (len(LAUNCH_LOG) >= LAUNCHES_PER_HOUR or sum(1 for _, s_ in LAUNCH_LOG if s_ == src) >= LAUNCHES_PER_SOURCE):
         raise HTTPException(429, "Lots of launches right now. Try again in a little while.")
     if MODERATION and ENGINE["mm"] is not None:
         from lp_moderate import flagged
@@ -669,7 +859,7 @@ async def api_create(req: Request):
     persona = clean(f.get("persona"), 600, "character")
     if len(name) < 2 or len(ticker) < 2 or len(persona) < 12:
         raise HTTPException(400, "A name, a ticker and a character (a sentence or two) are needed.")
-    if any(c.d["ticker"] == ticker for c in COINS.values()):
+    if any(c.d["ticker"] == ticker and c.market.kind != "sim" for c in COINS.values()):
         raise HTTPException(400, f"${ticker} is taken.")
     concept = None
     cf = f.get("concept") or {}
@@ -696,8 +886,9 @@ async def api_create(req: Request):
         if not ours:
             raise HTTPException(400, why)
     if not (market == "pump" and mint in PREPARED):    # (a pump.fun launch was checked before its transaction)
-        await gate(f, req, name, persona, (concept or {}).get("name", ""))
-    LAUNCH_LOG.append((now, src))
+        await gate(f, req, name, persona, (concept or {}).get("name", ""), demo=market == "sim")
+    if market != "sim":
+        LAUNCH_LOG.append((now, src))
     d = new_coin_doc({"name": name, "ticker": ticker, "persona": persona, "concept": concept, "temperament": temp,
                       "temperament_name": f.get("temperament_name"), "look": look, "steer_mode": mode, "model": model,
                       "creator": str(f.get("creator") or "")[:64] or None, "mint": mint, "market": market,
@@ -786,7 +977,7 @@ async def api_pump_prepare(req: Request):
     persona = clean(f.get("persona"), 600, "character")
     if len(f["name"]) < 2 or len(f["ticker"]) < 2 or len(persona) < 12:
         raise HTTPException(400, "A name, a ticker and a character (a sentence or two) are needed.")
-    if any(c.d["ticker"] == f["ticker"] for c in COINS.values()):
+    if any(c.d["ticker"] == f["ticker"] and c.market.kind != "sim" for c in COINS.values()):
         raise HTTPException(400, f"${f['ticker']} is taken.")
     await gate(f, req, f["name"], persona, clean((f.get("concept") or {}).get("name", ""), 60, "concept"))
     if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", str(f.get("creator") or "")) or not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", str(f.get("mint") or "")):
@@ -836,9 +1027,10 @@ def api_logs(cid: str, turn: str | None = None):
 @app.websocket("/api/ws/explore")
 async def ws_explore(ws: WebSocket):
     await ws.accept()
+    OUT[ws] = Out(ws)
     demo = ws.query_params.get("demo") == "1"
-    EXPLORE[ws] = demo
     await send(ws, {"type": "coins", "coins": [c.summary() for c in listed(demo)], "stats": stats(demo)})
+    EXPLORE[ws] = demo
     try:
         while True:
             await ws.receive_text()
@@ -846,6 +1038,9 @@ async def ws_explore(ws: WebSocket):
         pass
     finally:
         EXPLORE.pop(ws, None)
+        o = OUT.pop(ws, None)
+        if o:
+            o.close()
 
 
 @app.websocket("/api/ws/coin/{cid}")
@@ -856,6 +1051,7 @@ async def ws_coin(ws: WebSocket, cid: str):
         await send(ws, {"type": "error", "why": "No such coin."})
         await ws.close()
         return
+    OUT[ws] = Out(ws)
     vid = (ws.query_params.get("cid") or secrets.token_hex(6))[:24]
     wallet, nonce = None, secrets.token_hex(8)
     c.clients[ws] = vid
@@ -915,6 +1111,9 @@ async def ws_coin(ws: WebSocket, cid: str):
         pass
     finally:
         c.clients.pop(ws, None)
+        o = OUT.pop(ws, None)
+        if o:
+            o.close()
 
 
 def clean_q(text):

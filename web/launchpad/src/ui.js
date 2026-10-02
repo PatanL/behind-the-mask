@@ -43,4 +43,4 @@ export function feelBar(el, shown) {
   const tot = ORDER.reduce((a, e) => a + (shown[e] || 0), 0) || 1;
   [...el.children].forEach((i, k) => { i.style.width = `${((shown[ORDER[k]] || 0) / Math.max(1, tot)) * 100}%`; });
 }
-export const STATUS = { asleep: 'Asleep', waking: 'Waking up', awake: 'Awake', thinking: 'Thinking', 'losing it': 'Losing it' };
+export const STATUS = { asleep: 'Asleep', listening: 'Listening', waking: 'Waking up', awake: 'Awake', thinking: 'Thinking', 'losing it': 'Losing it' };

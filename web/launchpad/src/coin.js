@@ -31,7 +31,8 @@ let wi = 0, asked = null;
 function label() {
   const el = $('#speech-label');
   if (!info) return;
-  el.textContent = info.status === 'asleep' ? 'Asleep' : asked ? `Answering a visitor: “${asked}”` : `Live · ${info.name}`;
+  el.textContent = info.status === 'asleep' ? 'Asleep' : info.status === 'listening' ? 'Listening · it speaks again in a moment'
+    : asked ? `Answering a visitor: “${asked}”` : `Live · ${info.name}`;
 }
 function showWord(w) {
   if (perf) perf.word(w);
@@ -125,7 +126,7 @@ function askView() {
 function apply(d) {
   const first = !info;
   info = d;
-  document.title = `${d.name} ($${d.ticker}) · Steer AI Launchpad`;
+  document.title = `${d.name} ($${d.ticker}) · Steer AI`;
   $('#name').textContent = d.name; $('#ticker').textContent = `$${d.ticker}`;
   const st = $('#status'); st.textContent = STATUS[d.status] || d.status; st.className = `status ${d.status === 'asleep' ? '' : d.status === 'losing it' ? 'losing' : 'awake'}`;
   $('#sub').textContent = `${d.viewers || 1} watching${d.featured ? ' · the platform’s own android' : ''}`;
@@ -178,6 +179,7 @@ function connect() {
     else if (m.type === 'w') queue.push(...m.w);
     else if (m.type === 'wake') { stage.face.setSleep(0); if (m.startle) stage.face.startle(); }
     else if (m.type === 'sleep') { stage.face.setSleep(1); stage.face.setEmotion({}); wheel.reset(); }
+    else if (m.type === 'rest') { if (info) { info.status = 'listening'; label(); } }   // between turns to speak: awake, quiet
     else if (m.type === 'ask_ok' || m.type === 'ask_mine') { mine = { id: m.id, q: m.q }; $('#ask-in').value = ''; askNote = null; nextAskAt = Date.now() + 1000 * (m.type === 'ask_ok' ? m.gap || askGap : m.wait || 0); askView(); }
     else if (m.type === 'ask_err') { if (m.why === 'wait') nextAskAt = Date.now() + 1000 * (m.wait || 0); else askNote = { text: m.why, until: Date.now() + 6000 }; askView(); }
   };
