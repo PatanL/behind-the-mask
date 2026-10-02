@@ -155,3 +155,9 @@ footer a:hover { color: var(--cyan); }
 
 .ex-head { padding: 30px 0 10px; } .ex-head h1 { margin: 8px 0 8px; font-family: var(--display); font-weight: 600; font-size: 40px; letter-spacing: -0.02em; }
 .ex-head p { color: var(--ink2); margin: 0 0 16px; }
+
+.wallet-b.on { color: var(--cyan); border-color: var(--cyan-d); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .wallet-b { display: none; } }
+
+.live-strip { display: inline-flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 14px; border: 1px solid var(--line2); background: rgba(127, 231, 255, 0.04); font-size: 14px; color: var(--ink2); }
+.live-strip:hover { border-color: var(--cyan-d); box-shadow: var(--glow); color: var(--ink); } .live-strip b { color: var(--ink); }

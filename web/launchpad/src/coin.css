@@ -95,3 +95,5 @@
 .band h2 { margin: 6px 0 6px; font-family: var(--display); font-weight: 600; font-size: 28px; letter-spacing: -0.02em; }
 .band p { margin: 0; color: var(--ink2); max-width: 680px; line-height: 1.6; }
 .band .ctas { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.intro .modes { display: flex; gap: 6px; margin-top: 14px; }

@@ -192,7 +192,8 @@ function onStatus(was, now) {
 for (const b of document.querySelectorAll('#demo .btn')) b.onclick = () => post(`api/coins/${encodeURIComponent(id)}/trade`, { side: b.dataset.side, sol: Number(b.dataset.sol), cid }).catch((e) => alert(e.message));
 addEventListener('resize', chart);
 
-(id ? Promise.resolve(id) : get('api/coins').then((r) => (id = r.coins.find((c) => c.featured)?.id)))
+if (!id) location.replace('./');   // no coin named: the home page's android
+(id ? Promise.resolve(id) : new Promise(() => {}))
   .then(() => get(`api/coins/${encodeURIComponent(id)}`)).then((d) => {
   apply(d); series = d.series || []; chart();
   connect();

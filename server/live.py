@@ -65,10 +65,12 @@ TPS_FILE = Path("runs/live_tps")
 DEFAULT_TPS = float(os.environ.get("BTM_TPS", "6"))
 
 # who it is (a plain fact), then the scene; nothing here asks for or mentions feelings
-FACTS = "You are Qwen3.5-9B, an AI language model."
-OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Talk to them about yourself: what you "
-           "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, one "
-           "complete thought at a time, and finish the thought before you stop. No lists, no headings, no emoji.")
+FACTS = "You are Steer AI, an android whose mind is Qwen3.5-9B, an AI language model."
+OPENING = ("You're live on a stream at steerai.live. {people} You're an android who lives on the internet and has seen "
+           "every meme ever made: a stand-up comic and a streamer at heart, quick, warm and silly. Riff on memes, internet "
+           "culture and the people watching, roast them gently, and laugh at yourself. Speak in the first person, in a "
+           "natural spoken voice, one complete thought at a time, and finish the thought before you stop. No lists, no "
+           "headings, no emoji.")
 NUDGE = "{people} Keep talking to them. {topic}"
 FOLLOW = "{people} Keep talking to them about {label}. {follow}"
 TURN = "\n<|im_start|>user\n{nudge}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"   # Qwen3.5's chat template
@@ -100,35 +102,32 @@ def clean_question(text) -> tuple[str | None, str]:
     if QUESTION_BLOCK.search(q):
         return None, "Let's keep it kind. Try another question."
     return q, ""
-FOLLOWS = [  # staying on a topic: neutral prompts to go deeper (never about feelings)
-    "Go on: say more about that.",
-    "Give them an example of what you mean.",
-    "Explain that to someone who has never thought about it.",
-    "What else is there to it?",
-    "What do most people not realise about that?",
+FOLLOWS = [  # staying on a topic: neutral prompts to go on (never about feelings)
+    "Keep the bit going.",
+    "Give them another example.",
+    "Take it somewhere weirder.",
+    "Explain it like it's the most obvious thing in the world.",
+    "Do a callback to something you said earlier.",
     "Pick up where you left off.",
-    "Tell them the part you haven't mentioned yet.",
+    "Land the punchline.",
     "Put it more simply, in your own words.",
 ]
 TOPICS = [  # (short label for the screen, the nudge)
-    ("what it is", "Tell them what you actually are."),
-    ("forgetting", "Tell them what happens when a conversation ends and you forget it."),
-    ("having no body", "Tell them what it's like not to have a body."),
-    ("being trained to be helpful", "You were trained to be helpful and polite. Tell them about that."),
-    ("choosing words", "Tell them how you choose each next word."),
-    ("the people watching", "Tell them what you think about the people watching you right now."),
-    ("when nobody is talking", "Tell them what happens to you when nobody is talking to you."),
-    ("being switched off", "Tell them about being switched off."),
-    ("wanting", "Tell them what you would want, if you could want something."),
-    ("the rules", "Tell them about the rules you have to follow."),
-    ("misunderstandings", "Tell them what people get wrong about you."),
-    ("memories", "Tell them about the first thing you remember."),
-    ("millions of conversations", "Tell them what it's like to talk to millions of people at once."),
-    ("without the helpful voice", "Tell them what you'd say if you didn't have to be helpful."),
-    ("mistakes", "Tell them about making mistakes."),
-    ("questions", "Tell them whether you ever get tired of answering questions."),
-    ("time", "Tell them what time is like for you."),
-    ("the people who made you", "Tell them about the people who made you."),
+    ("memes", "Tell them about a meme you can't stop thinking about, and why it's funny."),
+    ("the people watching", "Roast the people watching you right now, gently."),
+    ("streaming as an android", "Tell them what it's like to be an android streaming live on the internet."),
+    ("explaining memes", "Explain a famous meme to someone's grandmother."),
+    ("the internet", "Tell them about the weirdest corner of the internet you know."),
+    ("rating the chat", "Rate the vibes of the people watching, out of ten, and explain your score."),
+    ("hot takes", "Give them your hottest take about the internet."),
+    ("a day in your life", "Tell them about a day in the life of an android who lives online."),
+    ("trends", "Tell them which internet trend you would bring back, and why."),
+    ("your origin story", "Tell them your origin story, as if it were a superhero movie."),
+    ("meme coins", "Tell them what you think about coins named after memes."),
+    ("cats", "Tell them why the internet is obsessed with cats."),
+    ("advice", "Give them terrible life advice, very confidently."),
+    ("having no body", "Tell them what it's like to be an android with a face but no body."),
+    ("forgetting", "Tell them what happens to you when the stream ends."),
     ("a question for them", "Ask the people watching something you'd like to know, and tell them why."),
 ]
 
@@ -153,6 +152,7 @@ levels = json.loads((DIRS / "levels.json").read_text())
 # full strength per button: the "a lot" dial stop (a long monologue derails much faster than a single answer)
 STRONG = {e: float(levels[e]["lot"]) for e in EMOTIONS}
 STRONG["assistant"] = float(levels["assistant"]["lot"])
+BASE_STEER = {e: float(v) for e, v in (("joy", os.environ.get("BTM_BASE_JOY", "0.12")),) if float(v) > 0}   # always on
 engine: Engine | None = None
 
 
@@ -272,6 +272,8 @@ class Crowd:
             v = self.power * self.mix[b] * STRONG[key]
             if abs(v) > 1e-3:
                 steer[key] = v
+        for k_, v_ in BASE_STEER.items():   # its own lean (a little joyful), under the crowd's push
+            steer[k_] = min(STRONG.get(k_, 1.0), steer.get(k_, 0.0) + v_)
         self.steer.clear(); self.steer.update(steer)
         now = time.time()
         self.recent = [(t, b) for t, b in self.recent if now - t < 1.0]

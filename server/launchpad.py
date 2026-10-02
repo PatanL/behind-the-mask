@@ -46,7 +46,9 @@ VOLUME_CREDIT = os.environ.get("LP_VOLUME_CREDIT", "1") == "1"
 FLAGSHIP_MINT = os.environ.get("LP_FLAGSHIP_MINT", "").strip()            # the platform android's own coin, once launched
 LAUNCHES_PER_HOUR = int(os.environ.get("LP_LAUNCHES_PER_HOUR", "30"))    # across the site
 LAUNCHES_PER_SOURCE = int(os.environ.get("LP_LAUNCHES_PER_SOURCE", "3"))  # per wallet / address per hour
-MODERATION = os.environ.get("LP_MODERATION", "1") == "1"  # the whole steering mix, at most (units of residual norm)            # androids talking at once on this machine
+MODERATION = os.environ.get("LP_MODERATION", "1") == "1"
+# demo coins (a simulated market, for trying an android out) only from the private test site / this machine
+DEMO_ORIGINS = [o for o in os.environ.get("LP_DEMO_ORIGINS", "http://100.97.32.64:4360,http://127.0.0.1:5197,http://127.0.0.1:4361").split(",") if o]  # the whole steering mix, at most (units of residual norm)            # androids talking at once on this machine
 STEP_RATE = float(os.environ.get("LP_STEP_RATE", "6"))           # tokens per second per android (at most)
 COST_SOL_HOUR = float(os.environ.get("LP_COST_SOL_HOUR", "0.02"))  # what an awake hour of compute costs
 FREE_SECONDS = float(os.environ.get("LP_FREE_SECONDS", "1200"))   # a new coin's first awake time
@@ -234,7 +236,7 @@ def load_coins():
             COINS[c.id] = c
         except Exception as e:  # noqa: BLE001
             print("[lp] bad coin file", f, e, flush=True)
-    if not any(c.d.get("featured") for c in COINS.values()):
+    if os.environ.get("LP_FLAGSHIP", "0") == "1" and not any(c.d.get("featured") for c in COINS.values()):   # (the home page's android is the exhibit's live AI)
         flagship = new_coin_doc({
             "name": "Steer AI", "ticker": "STEER", "featured": True, "temperament": {}, "temperament_name": "even",
             "persona": ("You are Qwen3.5-9B, an AI language model, on a live stream. Talk about yourself: what you are, "
@@ -243,8 +245,8 @@ def load_coins():
         })
         COINS[flagship["id"]] = Coin(flagship)
         COINS[flagship["id"]].save()
-    f = next(c for c in COINS.values() if c.d.get("featured"))
-    if FLAGSHIP_MINT and f.d.get("mint") != FLAGSHIP_MINT:   # its real coin: from now on its chart is its mood
+    f = next((c for c in COINS.values() if c.d.get("featured")), None)
+    if f and FLAGSHIP_MINT and f.d.get("mint") != FLAGSHIP_MINT:   # its real coin: from now on its chart is its mood
         f.d.update(mint=FLAGSHIP_MINT, market="pump")
         f.d.pop("market_state", None)
         COINS[f.id] = Coin(f.d)
@@ -669,6 +671,8 @@ async def api_create(req: Request):
     mode = f.get("steer_mode") if f.get("steer_mode") in STEER_MODES else "everyone"
     model = f.get("model") if any(m["id"] == f.get("model") and m["status"] == "live" for m in MODELS) else "qwen3.5-9b"
     market, mint = ("pump", str(f.get("mint") or "").strip()) if f.get("market") == "pair" else ("sim", None)
+    if market == "sim" and req.headers.get("origin", "") not in DEMO_ORIGINS:
+        raise HTTPException(400, "Coins launch on pump.fun.")
     if market == "pump":
         if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", mint or ""):
             raise HTTPException(400, "That isn't a Solana mint address.")

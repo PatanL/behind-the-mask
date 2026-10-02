@@ -2,22 +2,18 @@
 // key is made here, in the browser, and signs too (the server never holds a key). The server only relays the two
 // calls pump.fun / PumpPortal don't allow from a browser: the image + metadata upload, and building the transaction.
 import { get, post } from './api.js';
+import { connect } from './wallet.js';
 
 export async function pumpStatus() { try { return await get('api/pump/status'); } catch { return { launch: false }; } }
 
-function wallet() {
-  const p = window.phantom?.solana || (window.solana?.isPhantom ? window.solana : null);
-  if (!p) throw new Error('Connect a Solana wallet (Phantom) to launch on pump.fun.');
-  return p;
-}
 
 /** -> the new coin's mint address, once its creation is confirmed */
 export async function launchOnPump(coin) {
   const s = await pumpStatus();
   if (!s.launch) throw new Error('Launching on pump.fun is switched off on this server. Pair a coin you launched on pump.fun, or try a demo.');
   const { Keypair, VersionedTransaction } = await import('@solana/web3.js');
-  const w = wallet();
-  const { publicKey } = await w.connect();
+  const w = await connect();   // (the header's wallet, or it asks now)
+  const publicKey = (await w.connect({ onlyIfTrusted: true })).publicKey;
   const mint = Keypair.generate();
   const r = await post('api/pump/prepare', {
     creator: publicKey.toString(), mint: mint.publicKey.toBase58(), name: coin.name, ticker: coin.ticker,

@@ -1,65 +1,134 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Steer AI · a live android you can steer</title>
-  <meta name="description" content="A live android you can steer from the inside: push its feelings, ask it things, watch its face. And every coin can have one." />
-  <link rel="stylesheet" href="./src/coin.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Steer AI · a live android you can steer from the inside</title>
+  <meta name="description" content="A live AI you can steer from the inside: push it toward joy, sadness, fear… by editing its hidden state as it speaks, and watch its words and face change." />
 </head>
 <body>
-  <section class="intro"><div class="lbl">// steer ai · live</div>
-    <h1>A live android you can <em>steer from the inside</em>.</h1>
-    <p>Its words and its face come from a language model, and your taps push the model's hidden state while it talks. Push it, ask it things, watch it react.</p></section>
-  <main class="coin">
-    <section class="stage-col">
-      <div class="stage hud scan" id="stage"><canvas id="face"></canvas>
-        <div class="sleep-note" id="sleep-note" hidden><b>Asleep.</b> Nobody is paying for its mind. A trade wakes it.</div>
-        <aside class="inside-r" aria-label="How it feels inside">
-          <div class="lbl">How it feels inside</div>
+  <div id="app">
+    <header class="top">
+      <div class="brand"><span class="brand-mark"></span>Steer AI</div>
+      <nav class="site-nav"><a class="on" href="./">Live</a><a href="explore.html">Explore</a><a href="launch.html">Launch</a><a href="docs.html">Docs</a></nav>
+      <nav class="top-nav">
+        <button class="lp-btn wallet-b" id="wallet-top" type="button">Connect wallet</button>
+        <a class="lp-btn primary" href="launch.html">Launch a coin</a>
+        <button class="link" id="open-how"><span class="long">How does this work?</span><span class="short">How it works</span></button>
+        <a class="link x-link" href="https://x.com/steerailive" id="x-link" target="_blank" rel="noopener" aria-label="Steer AI on X" title="Steer AI on X (@steerailive)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg></a>
+      </nav>
+    </header>
+
+    <main class="stage-wrap">
+      <aside class="inside inside-l" aria-label="Inside the AI">
+        <div class="hud">
+          <div class="hud-h">The mask</div>
+          <div class="mask-ring" id="mask-meter" hidden title="How much its hidden state looks like its own assistant voice (100%) versus a role-played character (0%).">
+            <svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="50" /><circle class="val" cx="60" cy="60" r="50" pathLength="100" /></svg>
+            <b>–</b>
+          </div>
+          <div class="hud-note">How much it still sounds like its trained assistant self</div>
+        </div>
+        <div class="hud">
+          <div class="hud-h">Where we push</div>
+          <svg id="spine" viewBox="0 0 120 420" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
+      </aside>
+
+      <section class="stage" aria-label="The android">
+        <canvas id="face-canvas"></canvas>
+        <div class="stage-loading">Waking the android…</div>
+        <div class="push-badge" id="push-badge" hidden></div>
+        <div class="mini" id="mini" hidden><span class="mini-l">Mask</span><span class="mini-bar"><i id="mini-mask"></i></span><span class="mini-l" id="mini-emo-l">Joy</span><span class="mini-bar"><i id="mini-emo"></i></span></div>
+        <div class="subs">
+          <div class="speech-label" id="speech-label"></div>
+          <div class="speech" id="speech" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <aside class="inside inside-r" aria-label="How it feels inside">
+        <div class="hud">
+          <div class="hud-h">How it feels inside</div>
           <svg id="wheel" class="wheel" role="img" aria-label="Six feelings; each petal grows with how strongly it reads inside the model"></svg>
-        </aside>
-        <div class="subs"><div class="speech-label" id="speech-label"></div><div class="speech" id="speech"></div></div>
+        </div>
+        <div class="hud" id="features-wrap" hidden><div class="hud-h">Lighting up inside</div><div class="features" id="features"></div></div>
+        <div class="inside-note">Read from patterns in its hidden state: a measurement of language patterns, not feelings.</div>
+      </aside>
+
+    </main>
+
+
+    <section class="controls" id="deck">
+      <div class="mode" id="mode">
+        <button class="mode-b" id="mode-live" aria-pressed="true"><i class="live-dot"></i> <span class="long">Live, with everyone</span><span class="short">Live</span> <span class="live-n" id="mode-live-n"></span></button>
+        <button class="mode-b" id="mode-made" aria-pressed="false"><span class="long">Ready-made answers</span><span class="short">Ready-made</span></button>
       </div>
-      <div class="feel"><div class="feelbar" id="feelbar"></div><div class="feel-label" id="feel-label"></div></div>
+      <div class="ctl ctl-live" id="live" hidden>
+        <div class="live-buttons" id="live-buttons"></div>
+        <div class="ctl-foot">
+          <div class="crowd"><div class="crowd-bar" id="crowd-bar"></div><div class="crowd-meta"><span id="crowd-power">Connecting…</span><span id="crowd-viewers"></span></div></div>
+          <button class="link topic-b" id="new-topic">New topic ↻</button>
+        </div>
+        <div class="ask-box" id="ask-box" hidden>
+          <form class="ask" id="ask" autocomplete="off"><input id="ask-in" maxlength="200" placeholder="Ask it something…" aria-label="Ask it a question" /><button class="ask-b" id="ask-b" type="submit">Ask</button></form>
+          <div class="ask-card" id="ask-card" hidden aria-live="polite">
+            <div class="ask-card-top"><span class="ask-pill" id="ask-pill"></span><span class="ask-q" id="ask-q"></span></div>
+            <div class="ask-why" id="ask-why"></div>
+          </div>
+          <div class="ask-line" id="ask-line" aria-live="polite"></div>
+        </div>
+        <div class="ctl-status" id="live-status"></div>
+      </div>
+      <div class="ctl ctl-made" id="made" hidden>
+        <div class="made-bar">
+          <label class="q-pick"><span>Ask</span><select id="q-select" aria-label="Question"></select></label>
+          <div class="orbs" id="feelings"></div>
+          <div class="dial" id="dial">
+            <div class="dial-top"><span>How hard</span><b id="dial-val">A lot</b></div>
+            <input type="range" id="dial-in" min="1" max="5" step="1" value="3" aria-label="How hard to push" />
+          </div>
+          <button class="go" id="go"><span>Let it speak</span></button>
+        </div>
+        <div class="ctl-status"><span id="go-note"></span><button class="link" id="share" hidden>Share this answer ↗</button></div>
+      </div>
     </section>
-    <aside class="side">
-      <div class="panel head">
-        <div class="t1"><h1 id="name">…</h1><span class="tk mono" id="ticker"></span><span class="status" id="status"></span></div>
-        <div class="t2" id="sub"></div>
-        <div class="price"><span class="mono big" id="price">—</span><span class="mono" id="chg"></span></div>
-        <canvas class="chart" id="chart"></canvas>
-        <div class="nocoin" id="nocoin" hidden></div>
-        <div class="kv mono"><div>Mcap<b id="mcap">—</b></div><div>Volume<b id="vol">—</b></div><div>Curve<b id="curve">—</b></div><div>Awake for<b id="left">—</b></div></div>
-        <div class="demo" id="demo" hidden>
-          <span>Demo market: trades are simulated.</span>
-          <button class="btn" data-side="buy" data-sol="0.2">Buy 0.2</button><button class="btn" data-side="buy" data-sol="1">Buy 1</button><button class="btn" data-side="sell" data-sol="0.5">Sell 0.5</button>
-        </div>
+
+    <footer class="foot" id="research">
+      Built on <a href="https://transformer-circuits.pub/2026/emotions/index.html" target="_blank" rel="noopener">emotion vectors</a> (Anthropic, 2026),
+      <a href="https://arxiv.org/abs/2601.10387" target="_blank" rel="noopener">the assistant axis</a> (Lu et al., 2026),
+      <a href="https://arxiv.org/abs/2605.11887" target="_blank" rel="noopener">Qwen-Scope</a> (Deng et al., 2026) and
+      <a href="https://arxiv.org/abs/2312.06681" target="_blank" rel="noopener">activation steering</a>.
+      Qwen3.5-9B, ICT-FaceKit. The face and colours show measured activation patterns, not feelings.
+    </footer>
+
+    <div class="inspect" id="inspect" hidden role="dialog" aria-label="Word choice">
+      <button class="x" id="inspect-x" aria-label="Close">×</button>
+      <div class="inspect-title">Choosing the next word</div>
+      <div class="inspect-context" id="inspect-context"></div>
+      <div class="inspect-cols">
+        <div><div class="col-h">With the push</div><div class="bars" id="bars-steered"></div></div>
+        <div><div class="col-h muted">Without the push</div><div class="bars" id="bars-plain"></div></div>
       </div>
-      <div class="panel">
-        <div class="ph"><h3>Steer it</h3><span class="mode" id="mode"></span></div>
-        <div class="taps" id="taps"></div>
-        <div class="mix" id="mix"></div>
-        <div class="why" id="why"></div>
-        <div class="wallet" id="wallet"><button class="btn" id="wallet-b" type="button">Connect wallet</button><span id="wallet-s"></span></div>
+      <div class="inspect-foot" id="inspect-foot"></div>
+    </div>
+
+    <div class="sharebox" id="sharebox" hidden role="dialog" aria-label="Share">
+      <div class="sharebox-card">
+        <button class="x" id="share-x" aria-label="Close">×</button>
+        <img id="share-img" alt="Result card" />
+        <div class="share-row"><input id="share-link" readonly /><button class="pill" id="share-copy">Copy link</button></div>
+        <div class="share-note">Long-press or right-click the image to save it.</div>
       </div>
-      <div class="panel">
-        <h3>Ask it something</h3>
-        <div class="ask-box" id="ask-box">
-          <form class="ask" id="ask" autocomplete="off"><input class="in" id="ask-in" maxlength="200" placeholder="Ask it something…" /><button class="btn" id="ask-b" type="submit">Ask</button></form>
-          <div class="ask-card" id="ask-card" hidden><div class="ask-card-top"><span class="ask-pill" id="ask-pill"></span><span class="ask-q" id="ask-q"></span></div><div class="ask-why" id="ask-why"></div></div>
-          <div class="ask-line" id="ask-line"></div>
-        </div>
+    </div>
+
+    <div class="how" id="how" hidden role="dialog" aria-label="How it works">
+      <div class="how-card">
+        <button class="x" id="how-x" aria-label="Close">×</button>
+        <div class="how-steps" id="how-steps"></div>
+        <div class="how-nav"><button id="how-prev" class="link">Back</button><div class="dots" id="how-dots"></div><button id="how-next" class="pill">Next</button></div>
       </div>
-      <div class="panel char">
-        <h3>Its android</h3>
-        <p id="persona"></p>
-        <div class="kv2" id="char"></div>
-      </div>
-    </aside>
-  </main>
-  <section class="band"><div><div class="lbl">// launch</div><h2>Every coin can have one.</h2>
-    <p>Launch a coin on pump.fun and give it an android: a character, something hidden under its mask, a temperament and a face. Its trading keeps it awake; its chart is its mood.</p></div>
-    <div class="ctas"><a class="btn primary" href="launch.html">Launch a coin</a><a class="btn" href="explore.html">Explore androids</a></div></section>
-  <script type="module" src="./src/coin.js"></script>
+    </div>
+  </div>
+  <script type="module" src="./src/landing.js"></script>
 </body>
 </html>

@@ -1,0 +1,53 @@
+/* The exhibit page (web/src/style.css) in the launchpad's style: a dark grid, HUD brackets and mono labels, the cyan
+   of the android's eyes. The captions keep the exhibit's serif. Layout is the exhibit's own. */
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/600.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+:root { --bg: #03040a; --accent: #7fe7ff; --push: #7fe7ff; --line: rgba(127, 231, 255, 0.13); --ink2: #93a6c0; --ink3: #56657d;
+  --cyan: #7fe7ff; --cyan-d: rgba(127, 231, 255, 0.55); --mono: 'JetBrains Mono', ui-monospace, monospace; --display: 'Space Grotesk', 'Inter', sans-serif; }
+body { background-color: var(--bg);
+  background-image: radial-gradient(1200px 700px at 70% -10%, rgba(127, 231, 255, 0.07), transparent 60%), radial-gradient(900px 600px at -10% 30%, rgba(181, 123, 255, 0.05), transparent 60%),
+    linear-gradient(rgba(127, 231, 255, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(127, 231, 255, 0.035) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px; background-attachment: fixed; }
+/* header */
+.top { gap: 20px; border-bottom: 1px solid var(--line); padding: 12px 0 12px; }
+.brand { font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: 0.01em; }
+.brand-mark { width: 22px; height: 22px; border-radius: 50%; background: none; border: 1.5px solid var(--cyan); box-shadow: 0 0 18px rgba(127, 231, 255, 0.3), inset 0 0 6px rgba(127, 231, 255, 0.5); display: grid; place-items: center; }
+.brand-mark::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: iris 4s ease-in-out infinite; }
+@keyframes iris { 0%, 92%, 100% { transform: scale(1); } 95% { transform: scale(0.2, 1); } }
+.site-nav { display: flex; gap: 2px; margin-right: auto; margin-left: 8px; }
+.site-nav a { padding: 7px 12px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink2); text-decoration: none; border: 1px solid transparent; border-radius: 3px; }
+.site-nav a:hover { color: var(--ink); }
+.site-nav a.on { color: var(--cyan); border-color: rgba(127, 231, 255, 0.26); background: rgba(127, 231, 255, 0.05); }
+.top-nav { align-items: center; }
+.top-nav .link { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; border-radius: 3px; }
+.lp-btn { display: inline-flex; align-items: center; padding: 9px 14px; border-radius: 3px; border: 1px solid rgba(127, 231, 255, 0.26); background: rgba(127, 231, 255, 0.03);
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); text-decoration: none; }
+.lp-btn:hover { background: rgba(127, 231, 255, 0.08); box-shadow: 0 0 22px rgba(127, 231, 255, 0.22); }
+.lp-btn.primary { background: var(--cyan); color: #021018; border-color: var(--cyan); box-shadow: 0 0 22px rgba(127, 231, 255, 0.3); }
+.wallet-b.on { color: var(--cyan); border-color: var(--cyan-d); }
+/* the inside panels */
+.hud-h, .inside-title, .map-h, .col-h { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cyan-d); }
+.hud-note, .inside-note { color: var(--ink3); }
+.mask-ring b { font-family: var(--mono); font-weight: 500; }
+.wheel text { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.features span, .features div { border-radius: 2px !important; }
+.speech-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; }
+/* the stage: HUD brackets */
+.stage::before, .stage::after { content: ''; position: absolute; width: 14px; height: 14px; border-color: var(--cyan-d); border-style: solid; pointer-events: none; z-index: 5; }
+.stage::before { top: 0; left: 0; border-width: 1px 0 0 1px; } .stage::after { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+/* controls */
+.mode-b { border-radius: 3px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; border-color: rgba(127, 231, 255, 0.2); }
+.mode-b[aria-pressed="true"] { background: rgba(127, 231, 255, 0.1); color: var(--cyan); border-color: var(--cyan-d); box-shadow: inset 0 0 12px rgba(127, 231, 255, 0.08); }
+.orb { border-radius: 4px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.q-pick, .dial-top, .crowd-meta, .ctl-status { font-family: var(--mono); letter-spacing: 0.04em; }
+.q-pick select, .ask input, input.in { border-radius: 3px !important; border-color: rgba(127, 231, 255, 0.22) !important; background: rgba(3, 6, 14, 0.7) !important; }
+.go { border-radius: 4px; font-family: var(--mono); font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; background: var(--cyan); color: #021018; box-shadow: 0 0 30px rgba(127, 231, 255, 0.35); }
+.ask-b, .tapb, .topic-b, .pill { border-radius: 3px !important; }
+.tapb { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.how-card, .inspect, .sharebox-card { border-radius: 6px; border-color: rgba(127, 231, 255, 0.2); }
+.how-step h2 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; }
+input[type=range] { accent-color: var(--cyan); }
+.foot { font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; }
+@media (max-width: 860px) { .site-nav, .wallet-b, .lp-btn.primary { display: none; } }

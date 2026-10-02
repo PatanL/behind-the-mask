@@ -1,5 +1,6 @@
 // Shared bits for every launchpad page: the header, the footer, number formats.
 import { EMO, ORDER } from '../../src/palette.js';
+import { connect, disconnect, onWallet } from './wallet.js';
 export const $ = (s, el = document) => el.querySelector(s);
 export const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -13,8 +14,12 @@ export function header(on) {
     h('a', { class: 'brand', href: base }, h('span', { class: 'eye' }), 'Steer AI'),
     h('nav', { class: 'nav' }, ...[['Live', base], ['Explore', `${base}explore.html`], ['Launch', `${base}launch.html`], ['Docs', `${base}docs.html`]].map(([t, u]) => h('a', { href: u, class: on === t ? 'on' : '' }, t))),
     h('div', { class: 'sp' }),
+    h('button', { class: 'btn wallet-b', id: 'wallet-top', type: 'button' }, 'Connect wallet'),
     h('a', { class: 'btn primary', href: `${base}launch.html` }, 'Launch a coin'));
   document.body.prepend(el);
+  const b = el.querySelector('#wallet-top');
+  onWallet((a) => { b.textContent = a ? `${a.slice(0, 4)}…${a.slice(-4)}` : 'Connect wallet'; b.classList.toggle('on', !!a); b.title = a ? 'Connected. Click to disconnect.' : 'Connect a Solana wallet (Phantom)'; });
+  b.onclick = () => (b.classList.contains('on') ? disconnect() : connect().catch((e) => alert(e.message)));
 }
 export function footer() {
   const base = import.meta.env.BASE_URL;
