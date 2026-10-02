@@ -11,6 +11,7 @@ Assistant axis, following Lu et al., "The Assistant Axis" (2026, arXiv:2601.1038
 The base model reads the same stories (comprehension) for its own emotion vectors.
 
 usage (in container): python build_vectors.py --chat Qwen/Qwen3.5-9B --base Qwen/Qwen3.5-9B-Base --out runs/q9b
+                      (--base none: chat directions only; --reuse with another model's stories.json/personas.json copied in)
 """
 import argparse, json, random, time
 from pathlib import Path
@@ -170,6 +171,9 @@ def main():
     cos = (D @ D.T).numpy().round(2).tolist()
     print(json.dumps({"mind": "chat", "layer": layer, "layers": L, "mask_scale": chat_d["mask_scale"], "cos": dict(zip(EMOTIONS + ["assistant"], cos))}), flush=True)
     del m; torch.cuda.empty_cache()
+    if a.base.lower() == "none":   # (a model with no base release: chat directions only)
+        print(f"done in {time.time() - t0:.0f}s (no base model)")
+        return
 
     btok, bm = load(a.base)
     base_d, _ = build(btok, bm, False, axis=axis)
