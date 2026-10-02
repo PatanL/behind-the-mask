@@ -121,7 +121,6 @@ class Coin:
         self.e_last = None               # its last readout (6 feelings + concept)
         self.steer: dict = {}
         self.follow_i = 0
-        self.last_price_note = self.market.price()
         self.short = 0
         self.history: list = []          # (nudge, reply) of this conversation (for a fresh start)
         self.ready = d.get("concept_ready", False) or not d.get("concept")
@@ -207,7 +206,7 @@ class Coin:
         for e, w in (self.d.get("temperament") or {}).items():
             if e in steer:
                 steer[e] += float(w) * lv(e, "little", 0.3)
-        # (its chart doesn't push it: the owner's call -- it hears about big price moves as news instead, see next_turn)
+        # (its chart doesn't push it, and it isn't told about its coin: the owner's call)
         crowd = self.crowd_mix()
         for e in EMOTIONS:
             steer[e] += crowd[e] * lv(e, "lot", 0.5)
@@ -325,10 +324,8 @@ def job(fn):
 
 def prompt_ids(c: Coin, nudge: str, history: list | None = None) -> list[int]:
     chat = ENGINE["chat"]
-    t = c.d["ticker"]
     system = (f"You are {c.d['name']}. {c.d['persona']}\n"
-              f"You are performing live as an android, on a stream: people are watching your face while you talk. You "
-              f"exist because of a coin, ${t}: people trading it pays for your mind, and when nobody does, you fall asleep. "
+              f"You are performing live as an android, on a stream: people are watching your face while you talk. "
               f"Speak in the first person, as {c.d['name']}, in a natural spoken voice, one complete thought at a time, and "
               f"finish the thought before you stop. Stay in character. No lists, no headings, no emoji.")
     msgs = [{"role": "system", "content": system}]
@@ -459,16 +456,10 @@ async def next_turn(c: Coin):
     if row is None:
         return
     n = len(c.clients)
-    # what comes next: a visitor's question, a word on the chart if it moved a lot, or more of the same thought
-    p, p0 = c.market.price(), c.last_price_note
-    move = (p - p0) / p0 if p0 > 0 else 0.0
+    # what comes next: a visitor's question, or more of the same thought (it isn't told about its coin: the owner's call)
     if c.questions:
         c.asking = c.questions.pop(0)
         nudge = f"{people(n)} One of them asks you: \"{c.asking['q']}\" Answer them in character, and finish your answer before you stop."
-    elif abs(move) > 0.15:
-        c.last_price_note = p
-        nudge = (f"{people(n)} Your coin, ${c.d['ticker']}, just {'jumped' if move > 0 else 'fell'} {abs(move) * 100:.0f}% "
-                 f"in the last few minutes. Keep talking to them.")
     else:
         nudge = f"{people(n)} {FOLLOWS[c.follow_i % len(FOLLOWS)]}"
         c.follow_i += 1
