@@ -10,6 +10,8 @@ export const h = (tag, attrs = {}, ...kids) => {
 };
 export function header(on) {
   const base = import.meta.env.BASE_URL;
+  const had = document.querySelector('header.top');
+  if (had) { had.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('on', a.textContent === on)); return; }
   const el = h('header', { class: 'top' },
     h('a', { class: 'brand', href: base }, h('span', { class: 'eye' }), 'Steer AI'),
     h('nav', { class: 'nav' }, ...[['Live', base], ['Explore', `${base}explore`], ['Launch', `${base}launch`], ['Docs', `${base}docs`]].map(([t, u]) => h('a', { href: u, class: on === t ? 'on' : '' }, t))),
@@ -26,6 +28,7 @@ export function header(on) {
 }
 export function footer() {
   const base = import.meta.env.BASE_URL;
+  if (document.querySelector('body > footer')) return;
   document.body.append(h('footer', {}, h('span', {}, 'Steer AI · every coin has a live android'), h('a', { href: base }, 'Live'), h('a', { href: `${base}explore` }, 'Explore'), h('a', { href: `${base}launch` }, 'Launch'),
     h('a', { href: `${base}docs` }, 'Docs')));
 }

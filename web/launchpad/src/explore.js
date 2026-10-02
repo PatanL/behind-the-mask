@@ -18,7 +18,50 @@ document.addEventListener('click', (e) => {
   try { sessionStorage.setItem(`lp-look-${c.coin.id}`, JSON.stringify(c.coin.look)); } catch { /* */ }
   // and its face as it is right now, shown on the coin page until the live face is ready there
   try { const f = a.querySelector('canvas.face-frame'); if (f && f.width > 0) sessionStorage.setItem(`lp-shot-${c.coin.id}`, f.toDataURL('image/jpeg', 0.85)); } catch { /* */ }
+  if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;   // (a new tab: an ordinary link)
+  e.preventDefault();
+  openCoin(a, c).catch(() => { location.href = a.href; });
 }, true);
+
+// ---- opening a coin without leaving the page: its page's markup and code come in here (fetched ahead of time), and
+// the card's live face moves into its stage and keeps going until the coin page's own full-quality face fades in
+// over it. The address is the coin's (a reload or a shared link is the ordinary coin page); back reloads explore.
+let torn = false, exploreWs = null, opened = false;
+const coinPage = new Promise((r) => setTimeout(r, 1500)).then(async () => {
+  const html = await (await fetch(`${import.meta.env.BASE_URL}coin`)).text();
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const script = doc.querySelector('script[type="module"][src]')?.getAttribute('src');
+  const css = [...doc.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href'));
+  const link = (attrs) => document.head.append(Object.assign(document.createElement('link'), attrs));
+  for (const l of doc.querySelectorAll('link[rel="modulepreload"]')) link({ rel: 'modulepreload', href: l.getAttribute('href'), crossOrigin: 'anonymous' });
+  if (script) link({ rel: 'modulepreload', href: script, crossOrigin: 'anonymous' });
+  for (const href of css) link({ rel: 'preload', as: 'style', href });
+  return { body: [...doc.body.children].filter((n) => n.tagName !== 'SCRIPT'), script, css, title: doc.title };
+}).catch(() => null);
+
+async function openCoin(a, c) {
+  const page = await Promise.race([coinPage, new Promise((r) => setTimeout(() => r(null), 1200))]);
+  if (!page?.script || opened) { location.href = a.href; return; }
+  opened = true;
+  await Promise.all(page.css.map((href) => (document.querySelector(`link[rel="stylesheet"][href="${href}"]`) ? null
+    : new Promise((res) => { const l = Object.assign(document.createElement('link'), { rel: 'stylesheet', href }); l.onload = l.onerror = res; document.head.append(l); }))));
+  history.pushState({ soft: true }, '', a.href);
+  const live = c.slot ? c.box : null;
+  if (live) try { sessionStorage.removeItem(`lp-shot-${c.coin.id}`); } catch { /* */ }   // (the live face carries over instead)
+  // explore stops: its sockets, its observer, every other face
+  torn = true;
+  try { exploreWs?.close(); sx.ws?.close(); } catch { /* */ }
+  io.disconnect();
+  for (const el of [...wall.slots.keys()]) if (el !== live) wall.detach(el);
+  document.querySelector('main').replaceWith(...page.body.map((n) => document.importNode(n, true)));
+  document.title = page.title;
+  scrollTo(0, 0);
+  const stage = document.querySelector('#stage');
+  if (live && stage) wall.retarget(live, stage); else wall.stop();
+  addEventListener('coin-face-shown', () => wall.stop(), { once: true });
+  await import(/* @vite-ignore */ page.script);   // the coin page's own code, on this page
+}
+addEventListener('popstate', () => { if (opened) location.reload(); });
 
 // ---- $STEER at the top: the home page's android, live (a light feed of its words and readouts)
 const sx = { slot: wall.attach($('#sx-box'), { look: { skin: 'porcelain', eye: '#7fe7ff' }, seed: 11 }), perf: null, words: [], queue: [], timer: 0, plain: [], L: null };
@@ -27,6 +70,7 @@ sx.slot.face.ready.then(() => { sx.perf = new Performer(sx.slot.face); });
 fetch(`${import.meta.env.BASE_URL}performances/index.json`).then((r) => r.json()).then((j) => { sx.L = j.labels; }).catch(() => {});
 const inOrder = (v) => ORDER.map((e) => { const k = sx.L ? sx.L.indexOf(e) : ORDER.indexOf(e); return k >= 0 ? v?.[k] ?? 0 : 0; });
 function sxWord(w) {
+  if (torn) return;
   // like the home page: its readout over the turn's unpushed baseline (the mean of b so far)
   if (w.b) sx.plain.push(inOrder(w.b));
   const n = sx.plain.length, mu = ORDER.map((_, k) => (n ? sx.plain.reduce((a, x) => a + x[k], 0) / n : 0));
@@ -55,7 +99,8 @@ function sxLive() {
     else if (m.type === 'crowd') $('#sx-meta').textContent = `${m.viewers} watching${m.power > 0.05 ? ` · being pushed ${Math.round(m.power * 100)}%` : ''}`;
     else if (m.type === 'full') $('#sx-status').textContent = 'Busy';
   };
-  ws.onclose = () => setTimeout(sxLive, 5000);
+  sx.ws = ws;
+  ws.onclose = () => { if (!torn) setTimeout(sxLive, 5000); };
 }
 sxLive();
 
@@ -170,6 +215,7 @@ let listed = false;
 setTimeout(() => { if (!listed) $('#stats').replaceChildren(h('div', {}, h('b', {}, 'offline'), h('span', {}, 'the androids are resting'))); }, 6000);
 function connect() {
   const ws = new WebSocket(`${wsUrl('api/ws/explore')}${DEMO ? '?demo=1' : ''}`);
+  exploreWs = ws;
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === 'coins') { listed = true; apply(m); }
@@ -181,6 +227,6 @@ function connect() {
       apply({ coins: [...by.values()], stats: m.stats });
     }
   };
-  ws.onclose = () => setTimeout(connect, 3000);
+  ws.onclose = () => { if (!torn) setTimeout(connect, 3000); };
 }
 connect();

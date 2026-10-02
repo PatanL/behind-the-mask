@@ -38,7 +38,7 @@ export class FaceWall {
     this.gov = new Governor({ name: 'faces', start: startTier() ? 1 : 0, apply: (q) => { this.max = q.max; this.every = q.every; r.setSize(q.max, q.max, false); },
       tiers: [{ max: MAX, every: 1 }, { max: 512, every: 1 }, { max: 400, every: 2 }, { max: 320, every: 3 }] });
     this.gov.arm(4000);
-    const loop = () => { this.render(); requestAnimationFrame(loop); };
+    const loop = () => { if (this.stopped) return; this.render(); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
 
@@ -67,6 +67,27 @@ export class FaceWall {
     return slot;
   }
 
+  /** Opening a coin from the grid: its card's live face carries on in the coin page's stage (framed like it) while
+   *  the full-quality face gets ready there, so there's no frozen moment. -> the slot */
+  retarget(from, to) {
+    const s = this.slots.get(from);
+    if (!s) return null;
+    this.slots.delete(from);
+    s.el = to; s.stage = true;
+    this.slots.set(to, s);
+    s.frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block';
+    to.prepend(s.frame);   // under the stage's own canvas, which fades in over it
+    if (this.max < 1024) { this.max = 1024; this.renderer.setSize(1024, 1024, false); }   // one big face now, not a grid
+    return s;
+  }
+
+  /** Done (the page moved on): no more drawing, and the GPU context is let go. */
+  stop() {
+    for (const el of [...this.slots.keys()]) this.detach(el);
+    this.stopped = true;
+    try { this.renderer.dispose(); this.renderer.forceContextLoss(); } catch { /* */ }
+  }
+
   detach(el) {
     const s = this.slots.get(el);
     if (!s) return;
@@ -89,7 +110,12 @@ export class FaceWall {
       const k = Math.min(1, MX / Math.max(b.width * dpr, b.height * dpr));
       const w = Math.round(b.width * dpr * k), h = Math.round(b.height * dpr * k);
       if (s.frame.width !== w || s.frame.height !== h) { s.frame.width = w; s.frame.height = h; }
-      s.camera.aspect = w / h; s.camera.updateProjectionMatrix();
+      s.camera.aspect = w / h;
+      if (s.stage) {   // framed like the coin page's stage (see stage.js resize), so the hand-over doesn't jump
+        const tall = w / h < 0.8, fit = tall ? 1.0 : 0.87;
+        s.camera.fov = 24; s.camera.position.set(0, 0.035, fit + 0.03); s.camera.lookAt(0, tall ? -0.05 : -0.04, 0.03);
+      }
+      s.camera.updateProjectionMatrix();
       r.setViewport(0, 0, w, h); r.setScissor(0, 0, w, h); r.clear();
       r.render(s.scene, s.camera);
       // the rendered corner (bottom-left in GL terms is the canvas's bottom rows) into this card's frame

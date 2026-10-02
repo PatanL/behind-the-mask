@@ -30,6 +30,7 @@ async function reveal() {
   try { await stage.prepare(); } catch { /* */ }
   requestAnimationFrame(() => requestAnimationFrame(() => {
     faceEl.style.opacity = '1'; performance.mark('face-shown');
+    setTimeout(() => dispatchEvent(new Event('coin-face-shown')), 500);
     if (!shotEl.hidden) { shotEl.style.opacity = '0'; setTimeout(() => { shotEl.hidden = true; }, 600); }
   }));
 }
