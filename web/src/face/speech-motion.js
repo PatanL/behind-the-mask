@@ -3,13 +3,16 @@
  * work, never the currently playing shape. An empty stream stays quiet.
  */
 const clamp = (v, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
+// Open vowels show the upper teeth (upper-lip raise ~0.35-0.45: below ~0.3 the teeth stay hidden, a puppet's mouth)
+// and F/V rests the upper teeth on a lightly tucked lower lip: measured against film performances, the android's
+// upper-lip raise was ~0.1x the actors'.
 const POSES = Object.freeze({
-  A: { jawOpen: .23, mouthLowerDownLeft: .12, mouthLowerDownRight: .12 },
-  E: { jawOpen: .10, mouthStretchLeft: .16, mouthStretchRight: .16 },
+  A: { jawOpen: .23, mouthLowerDownLeft: .12, mouthLowerDownRight: .12, mouthUpperUpLeft: .45, mouthUpperUpRight: .45 },
+  E: { jawOpen: .10, mouthStretchLeft: .16, mouthStretchRight: .16, mouthUpperUpLeft: .35, mouthUpperUpRight: .35 },
   O: { jawOpen: .16, mouthFunnel: .28, mouthPucker: .12 },
   U: { jawOpen: .04, mouthPucker: .38, mouthFunnel: .17 },
   M: { jawOpen: 0, mouthPressLeft: .32, mouthPressRight: .32, mouthClose: .18 },
-  F: { jawOpen: .025, mouthRollLower: .27, mouthUpperUpLeft: .07, mouthUpperUpRight: .07 },
+  F: { jawOpen: .025, mouthRollLower: .12, mouthUpperUpLeft: .30, mouthUpperUpRight: .30 },
   S: { jawOpen: .045, mouthStretchLeft: .065, mouthStretchRight: .065 },
   SH: { jawOpen: .06, mouthFunnel: .21, mouthPucker: .12 },
   REST: { jawOpen: 0 },

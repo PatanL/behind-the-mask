@@ -30,6 +30,8 @@ export async function liveStatus() {
 export function createLive(ctx) {
   const { $, stage, speech } = ctx;
   let ws = null, on = false, story = null, lastListen = 0, retry = 0, refused = 0, shownTalk = null, topic = '', viewers = 0, lite = false;
+  // visitor questions: `asked` is the one being answered; `mine` is this visitor's own (waiting or being answered)
+  let asked = null, mine = null, askGap = 30, nextAskAt = 0, askNote = null, askTimer = 0, lastLine = null;
   // taps go out in batches (counts per feeling, every 0.4 s): a tenth of the messages, the same push
   const counts = {};
   let tapTimer = 0;
@@ -88,7 +90,7 @@ export function createLive(ctx) {
     ORDER.forEach((e) => { ema[e] = 0; });
     if (cont) speech.continueLine(); else speech.begin();
     $('#speech').classList.remove('overdrive');
-    topic = msg.topic || ''; label();
+    topic = msg.topic || ''; asked = msg.asked || null; label();
     if (msg.pace) beatMs = 1000 / msg.pace;   // words are shown at the pace they are written
     if (!cont) stage.face.react('think');
     const id = msg.id;
@@ -98,7 +100,7 @@ export function createLive(ctx) {
   // phones drop the words in .lp ("Live · talking about the people watching · 5 here")
   function label() {
     const el = $('#speech-label'), lp = (t) => Object.assign(document.createElement('span'), { className: 'lp', textContent: t });
-    el.replaceChildren(lp('Live · '), `talking about ${topic}`);
+    el.replaceChildren(lp('Live · '), asked ? (mine && mine.q === asked ? `answering your question: “${asked}”` : `answering a visitor: “${asked}”`) : `talking about ${topic}`);
     if (viewers > 1) el.append(` · ${viewers} `, lp('people '), 'here');
     if (lite) el.append(' · a few seconds behind');
   }
@@ -167,6 +169,41 @@ export function createLive(ctx) {
   }
   function status(t) { $('#live-status').textContent = t; }
 
+  // ---- visitor questions: one global line. While yours waits or is being answered, the box shows it and why you
+  // can't ask another; after that, a short countdown if the 30 s gap hasn't passed.
+  function askView() {
+    if ($('#ask-box').hidden) return;
+    const L = lastLine || {}, qids = L.qids || [];
+    const pos = mine ? qids.indexOf(mine.id) : -1, answering = !!mine && L.asking_id === mine.id;
+    if (mine && (pos >= 0 || answering)) mine.seen = true;
+    else if (mine && mine.seen) mine = null;            // answered (or dropped)
+    const card = !!mine;
+    $('#ask').hidden = card; $('#ask-card').hidden = !card;
+    $('#ask-card').classList.toggle('now', answering);
+    if (card) {
+      $('#ask-pill').textContent = answering ? 'Answering now' : pos === 0 ? 'Next' : pos > 0 ? `#${pos + 1} in line` : 'Sent';
+      $('#ask-q').textContent = `“${mine.q}”`; $('#ask-q').title = mine.q;
+      $('#ask-why').textContent = answering ? 'It’s answering you. Ask another when it’s done.'
+        : 'One at a time. You can ask another once it’s answered.';
+    }
+    const wait = Math.ceil((nextAskAt - Date.now()) / 1000);
+    const cooling = !card && wait > 0;
+    $('#ask-in').disabled = cooling;
+    $('#ask-b').disabled = cooling;
+    $('#ask-b').textContent = cooling ? `${wait}s` : 'Ask';
+    const line = $('#ask-line');
+    line.classList.toggle('warn', !!askNote && Date.now() < askNote.until);
+    if (askNote && Date.now() < askNote.until) line.textContent = askNote.text;
+    else if (cooling) line.textContent = `You can ask again in ${wait} s (one question every ${Math.round(askGap)} s).`;
+    else {
+      const others = qids.filter((id) => id !== mine?.id).length;
+      line.textContent = card ? (others ? `${others} other question${others > 1 ? 's' : ''} in line.` : '')
+        : L.qn ? `Next: “${L.qs?.[0] || ''}”${L.qn > 1 ? ` · ${L.qn} in line` : ''}` : 'Ask it anything. Questions are answered in order, after its current thought.';
+    }
+    clearTimeout(askTimer);
+    if (cooling || (askNote && Date.now() < askNote.until)) askTimer = setTimeout(askView, 1000);
+  }
+
   // ---- the crowd meter
   function crowd(msg) {
     const p = msg.power || 0;
@@ -178,6 +215,7 @@ export function createLive(ctx) {
     $('#crowd-viewers').textContent = msg.viewers > 1 ? `${msg.viewers} steering` : 'Just you';
     if (msg.viewers !== viewers) { viewers = msg.viewers; if (story) label(); }
     $('#new-topic').disabled = !msg.topic_ready || msg.changing;
+    lastLine = msg; askView();
     ctx.onPush?.(p < 0.04 ? null : lead, p);
     // other people's taps light the buttons
     for (const [i, n] of (msg.taps || []).entries()) {
@@ -238,6 +276,18 @@ export function createLive(ctx) {
       else if (msg.type === 'wc') catchUp(msg);                                 // a late joiner's catch-up: at once
       else if (msg.type === 'alts') { const r = altWait.get(`${msg.id}:${msg.i}`); if (r) { altWait.delete(`${msg.id}:${msg.i}`); r(msg); } }
       else if (msg.type === 'mode') { lite = !!msg.lite; label(); }
+      else if (msg.type === 'ask_on') { askGap = msg.gap || 30; $('#ask-box').hidden = false; askView(); }
+      else if (msg.type === 'ask_ok' || msg.type === 'ask_mine') {
+        mine = { id: msg.id, q: msg.q, seen: false }; $('#ask-in').value = ''; askNote = null;
+        nextAskAt = Date.now() + 1000 * (msg.type === 'ask_ok' ? (msg.gap || askGap) : (msg.wait || 0));
+        if (msg.type === 'ask_ok' && lastLine) lastLine = { ...lastLine, qids: [...(lastLine.qids || []), msg.id] };   // until the next crowd update
+        askView();
+      }
+      else if (msg.type === 'ask_err') {
+        if (msg.why === 'wait') nextAskAt = Date.now() + 1000 * (msg.wait || 0);
+        else askNote = { text: msg.why || 'That didn’t go through. Try again.', until: Date.now() + 6000 };
+        askView();
+      }
       else if (msg.type === 'full') { ctx.onFull?.(msg.viewers); on = false; }   // the room is full: ready-made answers instead (leave() cleans up)
       else if (msg.type === 'live_begin' && !queue.length && !pacer) begin(msg);
       else enqueue(msg);
@@ -257,6 +307,8 @@ export function createLive(ctx) {
   return {
     get on() { return on; },
     newTopic() { if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'topic' })); $('#new-topic').disabled = true; },
+    /** A visitor's question for the global line (answered in order, one after each thought). */
+    ask(q) { q = String(q || '').trim(); if (q && ws?.readyState === 1) ws.send(JSON.stringify({ type: 'ask', q })); },
     /** A word's alternatives (with and without the push), fetched when someone inspects it. */
     alts(i) {
       if (!story || !ws || ws.readyState !== 1) return Promise.resolve(null);

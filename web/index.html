@@ -67,6 +67,14 @@
           <div class="crowd"><div class="crowd-bar" id="crowd-bar"></div><div class="crowd-meta"><span id="crowd-power">Connecting…</span><span id="crowd-viewers"></span></div></div>
           <button class="link topic-b" id="new-topic">New topic ↻</button>
         </div>
+        <div class="ask-box" id="ask-box" hidden>
+          <form class="ask" id="ask" autocomplete="off"><input id="ask-in" maxlength="200" placeholder="Ask it something…" aria-label="Ask it a question" /><button class="ask-b" id="ask-b" type="submit">Ask</button></form>
+          <div class="ask-card" id="ask-card" hidden aria-live="polite">
+            <div class="ask-card-top"><span class="ask-pill" id="ask-pill"></span><span class="ask-q" id="ask-q"></span></div>
+            <div class="ask-why" id="ask-why"></div>
+          </div>
+          <div class="ask-line" id="ask-line" aria-live="polite"></div>
+        </div>
         <div class="ctl-status" id="live-status"></div>
       </div>
       <div class="ctl ctl-made" id="made" hidden>

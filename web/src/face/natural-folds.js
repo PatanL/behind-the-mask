@@ -37,12 +37,15 @@ float naturalFoldHeight(vec3 P, float px) {
   h+=taper*nfSection(x-stem,mix(0.0017,0.00108,g),0.000115*compression,px);
   // A short root-of-nose crease, not a full horizontal bar.
   h+=nfGate(x,0.0,0.002,0.007,0.014)*nfSection(y-(0.042-0.18*x),0.0013,0.000045*compression,px);
-  // Forehead: long, rounded wrinkles that change gently across the forehead.
+  // Forehead: long, rounded wrinkles that change gently across the forehead. With no eyebrows to carry it, a brow raise
+  // (sadness, surprise, emphasis) has to read in these lines the way anger reads in the glabellar folds: nearly as
+  // deep as those, and visible at moderate raises (raise^1.3, not raise^2).
   float raise=clamp(A.y*(1.0-smoothstep(0.015,0.045,x))+A.z*smoothstep(0.01,0.04,x),0.0,1.0);
-  float forehead=(1.0-smoothstep(0.043,0.066,x))*raise*raise;
+  float forehead=(1.0-smoothstep(0.048,0.070,x))*pow(raise,1.3);
   float bend=1.25*x*x + 0.0006*sin(x*45.0+side);
-  h+=forehead*nfSection(y-0.084-bend,0.00165,0.000052,px);
-  h+=forehead*0.65*nfSection(y-0.093-bend*0.7,0.0018,0.000045,px);
+  h+=forehead*nfSection(y-0.084-bend,0.00165,0.000180,px);
+  h+=forehead*0.9*nfSection(y-0.093-bend*0.7,0.0018,0.000160,px);
+  h+=forehead*0.55*nfSection(y-0.1015-bend*0.5,0.0019,0.000120,px);
   // Lower lid: an OPEN tapered arc. Widening stretches/softens it, not another eye ring.
   float squeeze=clamp((0.70*lid+0.65*A.w)*(1.0-0.60*wide),0.0,1.0);
   float lowerY=0.0195 + 10.0*nfSquare(x-0.0312);

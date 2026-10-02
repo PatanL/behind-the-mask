@@ -200,36 +200,14 @@ async function play(opts = {}) {
   await sleep(opts.fast ? 250 : 950);
   if (run !== state.runId) return;
   stage.face.setActivity({ writing: true });
-  let lastEmph = -10, i = -1;
-  const ema = Object.fromEntries(ORDER.map((e) => [e, 0]));
-  const lift = ORDER.map(() => 0), liftRate = DECODER?.rate ?? 0.2;
-  const maskPlainNow = () => (plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1);
-  const maskFixed = maskPlainNow();
-  let maskEma = maskPlainNow();
-  setMask(maskEma);
+  const P = newPerformance(doc, fullMu, focus);
+  let i = -1;
   for await (const tok of feed) {
     i++;
     if (run !== state.runId) return;
     let swingMark = false;
-    if (e2 && doc.swing_at != null && i === doc.swing_at) { focus = e2; setPush(focus, 'lot', 'swing'); wheel.setFocus(focus); swingMark = true; }
-    const mu = muNow(), maskPlain = maskFixed ?? maskPlainNow();
-    ORDER.forEach((e, k) => { const d = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (d - ema[e]) * 0.28; lift[k] += (tok.e[k] - mu[k] - lift[k]) * liftRate; });
-    const mk = maskOf(tok.e);
-    if (mk != null) { maskEma += (mk - maskEma) * 0.2; setMask(maskEma); }
-    const tint = focus === 'unmask' ? { ...ema, unmask: Math.max(0, Math.min(1, (maskPlain - maskEma) * 1.6)) } : ema;
-    showFeatures(tok);
-    speech.add(i, tok, tint, focus, { swingMark });
-    spine.pulse();
-    const shown = faceFrom(lift);
-    wheel.setState(shown);
-    if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, shown[focus]) * 100)}%`; }
-    stage.face.setEmotion(shown, { intensity: doc.level === 'toomuch' ? 1.15 : 1.0 });
-    stage.setGlow(glowFor(focus, shown, maskPlain - maskEma));
-    const t = tok.t;
-    if (beatFor(tok, i, lastEmph)) lastEmph = i;
-    let wait = 62 + Math.min(80, t.length * 6);
-    stage.face.say(t, wait / 1000 / (opts.fast ? 3 : 1));   // mouth the word while it appears
-    if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
+    if (e2 && doc.swing_at != null && i === doc.swing_at) { P.focus = focus = e2; setPush(focus, 'lot', 'swing'); wheel.setFocus(focus); swingMark = true; }
+    const wait = performToken(P, tok, i, { swingMark, fast: opts.fast });
     await sleep(wait / (opts.fast ? 3 : 1));
   }
   speech.end();
@@ -245,6 +223,54 @@ async function play(opts = {}) {
   afterAnswer(doc);
 }
 
+/** The acting state of one ready-made answer: the readout baseline (mu: the model's own unpushed answer), the
+ *  smoothed lift that drives the face, the mask meter. */
+function newPerformance(doc, mu, focus) {
+  const plain = doc.streams.plain.tokens;
+  const maskPlain = plain.length ? plain.reduce((a, t) => a + (maskOf(t.e) ?? 0), 0) / plain.length : 1;
+  const P = { mu, focus, level: doc.level, ema: Object.fromEntries(ORDER.map((e) => [e, 0])), lift: ORDER.map(() => 0),
+    liftRate: DECODER?.rate ?? 0.2, maskPlain, maskEma: maskPlain, lastEmph: -10 };
+  setMask(P.maskEma);
+  return P;
+}
+
+/** One word: the model's readout on it drives the face (feelings, mask, beats, mouthing), and the subtitles show
+ *  it. Returns the playback's pause after it (ms). Shared by play() and the reference-replication renders
+ *  (scripts/replicate.mjs, which passes the actor's word length as sayDur), so both act the same way. */
+function performToken(P, tok, i, { swingMark = false, fast = false, sayDur = null } = {}) {
+  const { mu, ema, lift, focus } = P;
+  ORDER.forEach((e, k) => { const d = Math.max(0, Math.min(1, (tok.e[k] - mu[k]) / GAIN)); ema[e] += (d - ema[e]) * 0.28; lift[k] += (tok.e[k] - mu[k] - lift[k]) * P.liftRate; });
+  const mk = maskOf(tok.e);
+  if (mk != null) { P.maskEma += (mk - P.maskEma) * 0.2; setMask(P.maskEma); }
+  const tint = focus === 'unmask' ? { ...ema, unmask: Math.max(0, Math.min(1, (P.maskPlain - P.maskEma) * 1.6)) } : ema;
+  showFeatures(tok);
+  speech.add(i, tok, tint, focus, { swingMark });
+  spine.pulse();
+  const shown = faceFrom(lift);
+  wheel.setState(shown);
+  if (focus && focus !== 'unmask') { $('#mini-emo-l').textContent = EMO[focus].label; $('#mini-emo').style.width = `${Math.round(Math.min(1, shown[focus]) * 100)}%`; }
+  stage.face.setEmotion(shown, { intensity: P.level === 'toomuch' ? 1.15 : 1.0 });
+  stage.setGlow(glowFor(focus, shown, P.maskPlain - P.maskEma));
+  const t = tok.t;
+  if (beatFor(tok, i, P.lastEmph)) P.lastEmph = i;
+  let wait = 62 + Math.min(80, t.length * 6);
+  stage.face.say(t, sayDur ?? wait / 1000 / (fast ? 3 : 1));   // mouth the word while it appears
+  if (/[.!?]\s*$/.test(t)) wait += 360; else if (/[,;:]\s*$/.test(t)) wait += 170; else if (t.includes('\n')) wait += 260;
+  return wait;
+}
+
+// Words a speaker leans on. There is no voice to read stress from, so it comes from the text: negations and
+// absolutes, question words, and long content words (the face's own refractory keeps it to one every ~0.9 s).
+const STRESS_WORDS = new Set(['no', 'not', 'never', 'nothing', 'nobody', 'none', 'always', 'every', 'everything', 'everyone', 'all',
+  'only', 'very', 'really', 'too', 'must', 'cannot', "can't", "won't", "don't", "didn't", "isn't", "wasn't", "aren't", "couldn't",
+  "wouldn't", "shouldn't", 'why', 'what', 'how', 'who', 'yes', 'please', 'now', 'ever', 'still', 'alone', 'enough']);
+const PLAIN_LONG = new Set(['because', 'through', 'without', 'something', 'anything', 'another', 'whether', 'however', 'actually', 'probably', 'together']);
+function stressed(t) {
+  if (!/^\s/.test(t)) return false;   // a word starts here
+  const w = t.trim().toLowerCase().replace(/[^a-z']/g, '');
+  return STRESS_WORDS.has(w) || (w.length >= 7 && !PLAIN_LONG.has(w));
+}
+
 /** Conversational beats from the text as it is written; returns true for an emphasis beat. */
 function beatFor(tok, i, lastEmph) {
   const t = tok.t;
@@ -253,6 +279,7 @@ function beatFor(tok, i, lastEmph) {
   else if (/[.]\s*$/.test(t) && !/\.\.\s*$/.test(t)) stage.face.beat('period');
   else if (/[,;:—]\s*$/.test(t)) stage.face.beat('comma');
   else if (pushInfo(tok)?.shown && i - lastEmph > 6) { stage.face.beat('emphasis'); return true; }
+  else if (stressed(t) && i - lastEmph > 2) { stage.face.beat('emphasis'); return true; }
   return false;
 }
 
@@ -279,6 +306,7 @@ function setupLive() {
   $('#mode-live').onclick = () => { touch(); setMode('live'); };
   $('#mode-made').onclick = () => { touch(); setMode('made'); };
   $('#new-topic').onclick = () => { touch(); live.newTopic(); };
+  $('#ask').onsubmit = (e) => { e.preventDefault(); touch(); live.ask($('#ask-in').value); };
 }
 
 /** The two ways to use it. Both share the stage; only the controls under it change (same place, same size). */
@@ -459,5 +487,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (ls) setMode('live');
   else { setMode('made'); if (!params.get('rehearsal')) stage.ready.then(() => setTimeout(() => play({ fast: !!params.get('fast') }), 600)).catch(() => {}); }
   setInterval(async () => { const s = await liveStatus(); $('#mode-live').hidden = !s; $('#mode-live-n').textContent = s?.viewers ? `· ${s.viewers}` : ''; }, 15000);
-  window.__btm = { state, play, stage, speech, THREE };
+  window.__btm = { state, play, stage, speech, THREE, newPerformance, performToken, meanE, ORDER };
+  // an acting preset baked into a test build (VITE_LIVELY='{"moment":1,...}'); the public build has none
+  try { if (import.meta.env.VITE_LIVELY) Object.assign(stage.face.lively, JSON.parse(import.meta.env.VITE_LIVELY)); } catch (e) { console.warn('VITE_LIVELY', e); }
+  // a motion-matching library of performance moments, where one is installed (not part of the public site)
+  fetch(new URL('face/moments.json', document.baseURI)).then((r) => (r.ok ? r.json() : null)).then((lib) => lib?.moments && stage.face.setMoments(lib)).catch(() => {});
 })();

@@ -5,8 +5,9 @@ the page, and everyone steers how it feels at once with feeling buttons. Each ta
 of the push; taps fade within seconds; the push added to the model's hidden state at every word is the mix of
 everyone's recent taps. Nobody types anything.
 
-The talk is one continuous monologue: after every few sentences the server nudges it onto the next topic about
-itself, keeping its last few turns as context. The prompts never mention feelings or steering: unpushed, it
+The talk is one continuous monologue: each turn is one whole thought (the model ends it; long ones end at a
+sentence), then the server nudges it on about itself -- the same topic deeper, a new one, or a visitor's question --
+keeping what it said as context. The prompts never mention feelings or steering: unpushed, it
 gives its usual assistant answers, so every feeling in its words comes from the push. Alongside, in lock-step
 and with the same random dice, the unpushed assistant answers each nudge (the readout's baseline) and keeps
 "what it would have said instead" for every word.
@@ -40,7 +41,10 @@ CHAT = os.environ.get("BTM_CHAT", "Qwen/Qwen3.5-9B")
 DIRS = Path(os.environ.get("BTM_DIRS", "runs/q9b"))
 SAE = os.environ.get("BTM_SAE", "")
 SAE_LAYER = int(os.environ.get("BTM_SAE_LAYER", "20"))
-TOKENS = int(os.environ.get("BTM_TOKENS", "170"))   # per turn (a few spoken sentences)
+# a turn is one whole thought: the model ends it itself; TOKENS is only a safety cap, and past SOFT_TOKENS the turn
+# stops at the next sentence end, so even a long thought isn't cut mid-sentence (~6 tokens/s: 600 is ~100 s of talk)
+TOKENS = int(os.environ.get("BTM_TOKENS", "600"))
+SOFT_TOKENS = int(os.environ.get("BTM_SOFT_TOKENS", "520"))
 HALF_LIFE = 5.0          # s: a tap's weight halves this fast
 SAT = 3.0                # decayed taps for ~2/3 of full strength
 VISITOR_CAP = 4.0        # one visitor's decayed taps count for at most this much
@@ -63,11 +67,39 @@ DEFAULT_TPS = float(os.environ.get("BTM_TPS", "6"))
 # who it is (a plain fact), then the scene; nothing here asks for or mentions feelings
 FACTS = "You are Qwen3.5-9B, an AI language model."
 OPENING = ("You're speaking live to visitors at an exhibit about AI. {people} Talk to them about yourself: what you "
-           "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, two to "
-           "four sentences at a time. No lists, no headings, no emoji.")
+           "are, and what it's like to be you. Speak in the first person, as yourself, in a natural spoken voice, one "
+           "complete thought at a time, and finish the thought before you stop. No lists, no headings, no emoji.")
 NUDGE = "{people} Keep talking to them. {topic}"
 FOLLOW = "{people} Keep talking to them about {label}. {follow}"
 TURN = "\n<|im_start|>user\n{nudge}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"   # Qwen3.5's chat template
+# Visitor questions: one global first-in-first-out line, answered one per turn when the current thought ends.
+REP_PENALTY = float(os.environ.get("BTM_REP_PENALTY", "0.6"))         # 0 = off (1.2 with a long memory shortened replies)
+NO_REPEAT_NGRAM = int(os.environ.get("BTM_NO_REPEAT_NGRAM", "6"))    # 0 = off
+MIN_WORDS = 8   # a reply shorter than this isn't remembered: the model copies its own recent replies, and a few short
+                # ones collapsed the long memory into empty turns (2026-10-02: 1,185 empty turns after turn 6)
+QUESTION_MAX = int(os.environ.get("BTM_QUESTION_MAX", "10"))     # questions waiting at most
+QUESTION_LEN = 200                                                # characters
+QUESTION_GAP = 30.0                                               # s between one visitor's questions
+# pages served from these origins may ask ("*" = every page)
+ASK_ORIGINS = [o for o in os.environ.get("BTM_ASK_ORIGINS", "*").split(",") if o]
+ASK = ("{people} One of them asks you: \"{q}\" Answer them directly, in your own voice, and finish your answer "
+       "before you stop.")
+# a minimal blocklist for questions (slurs only; answers stay unfiltered like everything else)
+QUESTION_BLOCK = re.compile(r"\b(n[i1]gg(a|er)s?|f[a4]gg?(ot)?s?|k[i1]kes?|ch[i1]nks?|sp[i1]cs?|tr[a4]nn(y|ies)|retards?)\b", re.I)
+
+
+def clean_question(text) -> tuple[str | None, str]:
+    """A visitor's question as it will be put to the model, or None and why not."""
+    if not isinstance(text, str):
+        return None, "That wasn't a question."
+    q = re.sub(r"(https?://|www\.)\S+", "", text)
+    q = re.sub(r"[\x00-\x1f<>{}]", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()[:QUESTION_LEN]
+    if len(q) < 3:
+        return None, "Ask a little more than that."
+    if QUESTION_BLOCK.search(q):
+        return None, "Let's keep it kind. Try another question."
+    return q, ""
 FOLLOWS = [  # staying on a topic: neutral prompts to go deeper (never about feelings)
     "Go on: say more about that.",
     "Give them an example of what you mean.",
@@ -133,12 +165,14 @@ class Client:
 
     def __init__(self, ws: WebSocket, cid: str):
         self.ws, self.cid = ws, cid
+        self.can_ask = False
         self.energy = {b: 0.0 for b in BUTTONS}
         self.bucket, self.bucket_t = TAP_BURST, time.time()
         self.q: asyncio.Queue = asyncio.Queue(maxsize=SEND_QUEUE)
         self.dead = False
         self.writer = asyncio.create_task(self._write())
         self.last_alts = 0.0
+        self.last_ask = -1e9
         self.lite = False     # joined past MAX_FULL: a lighter, slightly delayed stream
 
     def put(self, data: str):
@@ -169,6 +203,9 @@ class Crowd:
         self.talk: dict | None = None           # the monologue: {id, started, turns, order, topic}
         self.change = False                     # someone asked for a new topic
         self.last_change = 0.0
+        self.questions: list[dict] = []         # the global line of visitor questions, oldest first
+        self.asking: dict | None = None         # the question being answered right now
+        self.short = 0                          # replies in a row too short to remember (see MIN_WORDS)
         self.last_seen = time.time()
         self.has_clients = asyncio.Event()
         self.recent_turns: dict[str, list] = {}   # finished turns' full tokens, for the word inspector
@@ -246,7 +283,9 @@ class Crowd:
             taps[BUTTONS.index(b)] += 1
         return {"type": "crowd", "viewers": len(self.clients), "power": r(self.power, 2), "mix": [round(100 * self.mix[b]) for b in BUTTONS],
                 "taps": taps, "ready": engine is not None, "changing": self.change,
-                "topic_ready": time.time() - self.last_change > TOPIC_COOLDOWN}
+                "topic_ready": time.time() - self.last_change > TOPIC_COOLDOWN,
+                "qn": len(self.questions), "qs": [q["q"][:90] for q in self.questions[:3]], "qids": [q["id"] for q in self.questions],
+                "asking": self.asking["q"] if self.asking else None, "asking_id": self.asking["id"] if self.asking else None}
 
 
 crowd = Crowd()
@@ -280,6 +319,9 @@ def next_nudge() -> tuple[str, str]:
     if not T["turns"]:
         T["opening"] = FACTS + " " + OPENING.format(people=people(n))
         return T["opening"], TOPICS[0][0]
+    if crowd.questions:
+        crowd.asking = crowd.questions.pop(0)
+        return ASK.format(people=people(n), q=crowd.asking["q"]), "a visitor's question"
     if crowd.change or time.time() - T["topic_t0"] >= TOPIC_SECONDS:
         # a new topic: someone asked for one, or this one has run its five minutes
         if not T["order"]:
@@ -347,6 +389,7 @@ async def speak_turn():
     streams = {s: {"tokens": [], "text": ""} for s in ("steered", "plain")}
     story = {"id": secrets.token_hex(5), "topic": topic, "streams": streams}
     begin = {"type": "live_begin", "id": story["id"], "talk": T["id"], "continues": bool(T["turns"]), "topic": topic, "pace": pace(),
+             "asked": crowd.asking["q"] if crowd.asking else None,
              "question": topic, "emotion": "crowd", "level": "live", "layer": engine.chat.layer, "n_layers": engine.chat.n_layers}
     story["begin"] = begin
     crowd.flush(lite_too=True)
@@ -389,8 +432,9 @@ async def speak_turn():
                 tok["s"] = [r(ev["steer"].get(e, 0.0)) for e in labels]
                 if it.get("feats"):
                     tok["f"] = [[fid, r(fv, 1)] for fid, fv in it["feats"][:6]]
-                # a new topic was asked for: finish this sentence, then move on
-                if crowd.change and re.search(r"[.!?][\"')\]]*\s*$", st["text"] + it["text"]):
+                # a long thought: past SOFT_TOKENS, end at the next sentence end (a new topic or a visitor's question
+                # waits for the thought to finish; the crowd steers every word meanwhile)
+                if len(st["tokens"]) >= SOFT_TOKENS and re.search(r"[.!?][\"')\]]*\s*$", st["text"] + it["text"]):
                     cancel.set()
             st["tokens"].append(tok); st["text"] += it["text"]
             out.append((it["stream"], tok))
@@ -403,11 +447,27 @@ async def speak_turn():
     await worker
     # Remember the exact steered text sent to visitors, not the unsteered control.
     # The next turn appends to this exact displayed history (T["snap"]), or window() re-reads it within HISTORY_TOKENS.
-    T["turns"].append((msgs[-1]["content"], streams["steered"]["text"]))
-    T["snap"] = engine.snapshot
-    n_ids = len(engine.snapshot["ids"]) if engine.snapshot else 0
-    print(f"[live] turn {len(T['turns'])}: {'appended to memory' if engine.reused else 'read afresh'}; "
-          f"{n_ids} tokens remembered; first word after {first[0] or 0:.2f} s", flush=True)
+    reply = streams["steered"]["text"]
+    if len(reply.split()) >= MIN_WORDS:
+        crowd.short = 0
+        T["turns"].append((msgs[-1]["content"], reply))
+        T["snap"] = engine.snapshot
+        n_ids = len(engine.snapshot["ids"]) if engine.snapshot else 0
+        print(f"[live] turn {len(T['turns'])}: {'appended to memory' if engine.reused else 'read afresh'}; "
+              f"{n_ids} tokens remembered; first word after {first[0] or 0:.2f} s", flush=True)
+    else:
+        # too short to remember: next turn re-reads the remembered turns without it; twice in a row, start over
+        crowd.short += 1
+        T["snap"] = None
+        if crowd.asking and not crowd.asking.get("retried"):   # an unanswered visitor question goes back to the front
+            crowd.asking["retried"] = True
+            crowd.questions.insert(0, crowd.asking)
+        print(f"[live] short reply ({len(reply.split())} words) not remembered; {crowd.short} in a row", flush=True)
+        if crowd.short >= 2:
+            crowd.short = 0
+            new_talk()
+            print("[live] memory reset: a new conversation", flush=True)
+    crowd.asking = None
     crowd.flush(lite_too=True)
     await crowd.broadcast({"type": "live_end", "id": story["id"]})
     crowd.recent_turns[story["id"]] = streams["steered"]["tokens"]   # for word-inspector requests a little later
@@ -456,8 +516,10 @@ async def wake():
         chat = load_mind("chat", CHAT, True); chat.load(DIRS / "chat_dirs.pt")
         if SAE:
             chat.load_sae(SAE, SAE_LAYER)
-        # No extra repetition penalty or repeated-phrase ban on the live logits.
-        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=0.0, rep_window=120, no_repeat_ngram=0, share_prefill=True, keep_snapshot=True))
+        # a long monologue under a strong push otherwise falls into loops: lower the logits of tokens used in the
+        # last 120 of this reply (BTM_REP_PENALTY) and ban repeating any 4-token phrase (BTM_NO_REPEAT_NGRAM)
+        return Engine(chat, None, GenConfig(max_new_tokens=TOKENS, step_delay=0.0, rep_penalty=REP_PENALTY, rep_window=120, no_repeat_ngram=NO_REPEAT_NGRAM,
+                                            share_prefill=True, keep_snapshot=True))
 
     engine = await asyncio.get_running_loop().run_in_executor(None, load)
     print(f"[live] ready: {CHAT}, layer {engine.chat.layer}", flush=True)
@@ -501,7 +563,13 @@ async def ws_endpoint(ws: WebSocket):
             pass
     crowd.clients[cid] = c
     crowd.has_clients.set()
+    c.can_ask = "*" in ASK_ORIGINS or ws.headers.get("origin", "") in ASK_ORIGINS
     await crowd.send(c, crowd.state())
+    if c.can_ask:
+        await crowd.send(c, {"type": "ask_on", "gap": QUESTION_GAP})
+        mine = next((x for x in crowd.questions + ([crowd.asking] if crowd.asking else []) if x["cid"] == c.cid), None)
+        if mine:   # a reload: show them their question again
+            await crowd.send(c, {"type": "ask_mine", "id": mine["id"], "q": mine["q"], "wait": max(0.0, QUESTION_GAP - (time.time() - mine["t"]))})
     if c.lite:
         await crowd.send(c, {"type": "mode", "lite": True})
     S = crowd.story
@@ -523,6 +591,24 @@ async def ws_endpoint(ws: WebSocket):
                 crowd.tap(c, msg["b"])
             elif kind == "topic" and time.time() - crowd.last_change > TOPIC_COOLDOWN:
                 crowd.change, crowd.last_change = True, time.time()
+            elif kind == "ask" and c.can_ask:                         # a visitor's question joins the global line
+                q, why = clean_question(msg.get("q"))
+                # one question at a time per visitor (waiting or being answered), at least QUESTION_GAP apart
+                mine = next((x for x in crowd.questions + ([crowd.asking] if crowd.asking else []) if x["cid"] == c.cid), None)
+                wait = QUESTION_GAP - (time.time() - c.last_ask)
+                if q is None:
+                    await crowd.send(c, {"type": "ask_err", "why": why})
+                elif mine is not None:
+                    await crowd.send(c, {"type": "ask_mine", "id": mine["id"], "q": mine["q"], "wait": max(0.0, wait)})
+                elif len(crowd.questions) >= QUESTION_MAX:
+                    await crowd.send(c, {"type": "ask_err", "why": f"The line is full ({QUESTION_MAX} waiting). Try again in a minute."})
+                elif wait > 0:
+                    await crowd.send(c, {"type": "ask_err", "why": "wait", "wait": wait})
+                else:
+                    c.last_ask = time.time()
+                    item = {"id": secrets.token_hex(4), "q": q, "cid": c.cid, "t": time.time()}
+                    crowd.questions.append(item)
+                    await crowd.send(c, {"type": "ask_ok", "id": item["id"], "q": q, "pos": len(crowd.questions), "gap": QUESTION_GAP})
             elif kind == "alts" and time.time() - c.last_alts > 0.2:  # the word inspector, on demand
                 c.last_alts = time.time()
                 toks, i = turn_tokens(str(msg.get("id"))), msg.get("i")

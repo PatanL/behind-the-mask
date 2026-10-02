@@ -253,6 +253,34 @@ const PERF_STYLE = {
   curiosity: { hold: 0.72, amp: 0.42, posture: 0.5 },    // focused
 };
 
+// Liveliness, measured against reference performances (an Oscar-performance study: on the same lines, the android's
+// brows moved 0.3-0.5x as much as the actors', its head 0.2-0.5x, and it was almost perfectly symmetric).
+// beatBrow / beatHead scale the brows and head of conversational beats; asym makes a brow beat one-sided;
+// speechHead is head movement while words are coming; headNoise scales the slow idle drift.
+const LIVELY = { beatBrow: 1, beatHead: 1, asym: 0, speechHead: 0, headNoise: 1, moment: 0, momentHead: 0, momentMouth: 0.5, momentEyes: 0.5, momentGaze: 0, momentLid: 0, momentEmo: 2, emoNorm: 0, momentHeadroom: 0, emoPulse: 0, emoSharpen: 0, beatRaise: 1, momentSmile: 1, momentBrowDown: 1, beatGap: 0.9, socialSmile: 1, raiseEmph: 0, emoScale: 1, beats: 1, griefBrow: 1, raiseGain: 1, angerBrow: 1, browSlow: 1, fearFreeze: 0, fearBrow: -1, angerHi: 0, glanceGap: 1, hurtBrow: 1, beatHold: 1, beatMerge: 0, momentCenter: 0, momentHeadSmooth: 0, momentYaw: 1, fearLeadBrow: 1, fearBlink: 0, fearStretch: 1, fearSpeech: 0, outerGain: 1, lidFollow: 0.9, momentSmooth: 0 };
+// moment: gain of the motion-matched performance moments (setMoments) on the brows and nose; momentMouth / momentEyes
+// relative gains for their mouth (on top of the android's own speech) and squint / cheek; momentHead: their head movement;
+// momentGaze: where the actor looked (degrees, through the face's own saccades); momentLid: their slow lid closure;
+// momentEmo: how much the felt emotion weighs when picking a moment (it predicted the actors' moment-level feeling
+// no better than a constant in the reference study, so continuity, talking and stress can carry the choice);
+// emoNorm: several strong feelings at once share the face (their expressions are scaled by total^-emoNorm when the
+// total passes 1, so stacked prototypes don't pin the brows at their maximum); momentHeadroom: a moment's movement
+// scales with the room a muscle has left (1 - its current value), so it still shows on top of a strong expression;
+// emoPulse: the expression is phrased like an actor's -- it builds into stressed words, questions and exclamations
+// and eases (to ~60%) between them and at sentence ends, instead of being held at one level;
+// emoSharpen: the face shows the dominant feeling and lets the others leak (each scaled by (v / strongest)^emoSharpen):
+// the readout of natural speech is diffuse -- three strong feelings at once pinned every brow channel at its maximum;
+// beatRaise: brow raises in conversational beats (the hairless brow needs ~0.3 before a raise shows at all);
+// momentSmile / momentBrowDown: the moments' smiles and brow lowering (relative to moment); beatGap: seconds between
+// emphasis beats; socialSmile: how often the regulated face smiles over a sentence end or a caught leak (x1);
+// angerBrow: how hard anger lowers the brows when it is NOT the leading feeling (mild anger mixed into a sad or
+// fearful reading pinned the brow in every scene; leading anger always keeps its full brow); browSlow: brow muscle
+// timing multiplier (slower brows make fewer, steadier movements); raiseGain: the brow-raise shapes' strength (the hairless brow's raise shape is weak: sadness 0.8 read as a tired
+// frown with no lift; extrapolated x1.35 the sad brow rises and reads); griefBrow: how much sadness and fear knit the brows (AU4; the actors' grief and fear raised the inner brows with
+// little knitting); raiseEmph: the share of emphasis beats that are an eyebrow flash (AU1+2) whatever the feeling -- the actors'
+// brows rose on stress ~3x as often as they lowered, the android's the other way round
+const EMO6 = ['joy', 'sadness', 'anger', 'fear', 'calm', 'curiosity'];
+
 // conversational emphasis, coloured by the dominant feeling (an angry speaker stresses words with the brows
 // pulled down, a sad one with the inner brows raised...)
 const EMPHASIS = {
@@ -456,6 +484,7 @@ export class AndroidFace {
     this.intensity = 1;
     this.duchenne = null;
     this.manualChannels = {};
+    this.lively = { ...LIVELY };
     this.motionStyle = { amplitude: 1, posture: 1 };
     this.externalIntent = { x: 0, v: 0, target: 0 };
     this.writing = false;
@@ -566,9 +595,11 @@ export class AndroidFace {
         } else if (role === 'cavity') {
           o.material = new THREE.MeshStandardMaterial({ color: 0x07080b, roughness: 0.7, metalness: 0.0 });
         } else if (role === 'teeth') {
-          o.material = new THREE.MeshPhysicalMaterial({ color: 0xe9e6df, roughness: 0.32, clearcoat: 0.8, clearcoatRoughness: 0.12 });
+          // teeth sit in the shadow of the lips: a softer off-white with little clear coat (bright glossy teeth read as dentures)
+          o.material = new THREE.MeshPhysicalMaterial({ color: 0xd9d3c7, roughness: 0.5, clearcoat: 0.15, clearcoatRoughness: 0.4, envMapIntensity: 0.5 });
         } else if (role === 'gums') {
-          o.material = new THREE.MeshPhysicalMaterial({ color: 0x15181d, roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.2 });
+          // the inside of the mouth: a warm, matte dark (a clear coat reflected the blue studio like chrome: uncanny)
+          o.material = new THREE.MeshPhysicalMaterial({ color: 0x1a1012, roughness: 0.95, clearcoat: 0, envMapIntensity: 0.05, specularIntensity: 0.2 });
         } else if (role === 'eye') {
           const ud = o.material.userData;
           o.material = this._eyeMaterial(ud);
@@ -781,6 +812,92 @@ export class AndroidFace {
     this.overlays.push({t0:this.time+.25,a:.65,h:.7,r:2.1,head:{pitch:-.85,z:.001}});
     this.setAttentionHold(.7);
   }
+  /** Motion matching: a library of short real-performance moments ({fps, channels, moments: [{e, i, spk, stress, d, h}]}:
+   *  per-frame expression deltas in rig units and head degrees, labelled by feeling, intensity, talking and a stressed
+   *  word at the start). One moment always plays, picked to fit what the face feels and does; its movement is added
+   *  on top of the face's own expression (scaled by lively.moment / lively.momentHead). */
+  setMoments(lib) {
+    this.moments = lib?.moments?.length ? lib : null;
+    this.mom = this.momPrev = null; this.momRecent = []; this.momHead = null;
+  }
+
+  _pickMoment(t) {
+    const lib = this.moments, f = this.felt || {}, R = this.rand;
+    const ev = EMO6.map((e) => f[e] || 0), tot = ev.reduce((a, b) => a + b, 0);
+    const want = tot > 0.06 ? ev.map((x) => x / tot) : [0, 0, 0, 0, 1, 0];
+    const inten = Math.min(1, tot), talking = t - (this.lastSay ?? -10) < 0.8 ? 1 : 0, stress = this.momKick ? 1 : 0;
+    const cur = this.mom ? this.mom.m.d[this.mom.m.d.length - 1] : null;
+    let best = [];
+    for (let n = 0; n < 160; n++) {
+      const m = lib.moments[Math.floor(R() * lib.moments.length)];
+      let dot = 0, nm = 0;
+      for (let k = 0; k < 6; k++) { dot += want[k] * m.e[k]; nm += m.e[k] * m.e[k]; }
+      const ce = 1 - dot / Math.sqrt(nm * want.reduce((a, x) => a + x * x, 0) + 1e-9);
+      const ci = Math.abs(Math.min(1, m.i / 0.12) - inten);
+      let cc = 0;
+      if (cur) { for (let k = 0; k < cur.length; k++) cc += Math.abs(cur[k] - m.d[0][k]); cc /= cur.length; }
+      const cost = this.lively.momentEmo * ce + 0.5 * ci + 0.8 * (m.spk !== talking) + 0.6 * (stress && !m.stress) + 4 * cc + (this.momRecent.includes(m) ? 3 : 0);
+      best.push([cost, m]);
+    }
+    best.sort((a, b) => a[0] - b[0]);
+    const m = best[Math.floor(R() * Math.min(4, best.length))][1];
+    this.momRecent.push(m); if (this.momRecent.length > 24) this.momRecent.shift();
+    this.momPrev = this.mom; this.mom = { m, t0: t }; this.momKick = false;
+  }
+
+  _moment(t, post) {
+    const lib = this.moments, L = this.lively;
+    if (!lib || !(L.moment > 0 || L.momentHead > 0) || !this.options.idle) { this.momHead = null; return; }
+    const fps = lib.fps, len = (M) => M.m.d.length / fps;
+    if (!this.mom || t - this.mom.t0 > len(this.mom) - 0.25 || (this.momKick && t - this.mom.t0 > 0.4)) this._pickMoment(t);
+    const at = (M, key) => {   // the moment's frame at time t (linear between frames), or null when over
+      const u = (t - M.t0) * fps, i = Math.floor(u), a = M.m[key];
+      if (i >= a.length - 1) return null;
+      const w = u - i;
+      return a[i].map((x, k) => x + (a[i + 1][k] - x) * w);
+    };
+    const xf = smooth(0, 0.25, t - this.mom.t0);   // crossfade from the previous moment
+    const cd = at(this.mom, 'd'), pd = this.momPrev ? at(this.momPrev, 'd') : null;
+    const ch = lib.channels;
+    if (!this.momGain || this.momGain.lib !== lib || this.momGain.key !== `${L.moment}|${L.momentMouth}|${L.momentEyes}|${L.momentSmile}|${L.momentBrowDown}`) {
+      this.momGain = { lib, key: `${L.moment}|${L.momentMouth}|${L.momentEyes}|${L.momentSmile}|${L.momentBrowDown}`,
+        g: ch.map((c) => L.moment * (c.startsWith('mouthSmile') ? L.momentSmile : c.startsWith('browDown') ? L.momentBrowDown : c.startsWith('mouth') ? L.momentMouth : /^(eyeSquint|cheek)/.test(c) ? L.momentEyes : 1)) };   // smiles at full strength: below ~0.25 they don't show
+    }
+    const G = this.momGain.g;
+    const hr = L.momentHeadroom > 0;
+    // momentSmooth: the moments' brow / eye movement goes through a spring (rad/s) like the face's own muscles -- added
+    // after the springs it carried the actors' tracker jitter and the jumps between moments (the brows twitched)
+    const MS = L.momentSmooth > 0 ? (this.momS || (this.momS = ch.map(() => ({ x: 0, v: 0 })))) : null;
+    const mdt = Math.min(0.05, Math.max(0, t - (this.momST ?? t))); this.momST = t;
+    if (cd) for (let k = 0; k < ch.length; k++) {
+      const room = hr ? Math.max(0, 1 - (this.ch[ch[k]]?.x || 0)) : 1;
+      let v = G[k] * room * (xf * cd[k] + (pd ? (1 - xf) * pd[k] : 0));
+      if (MS && /^(brow|eye|cheek)/.test(ch[k])) { spring(MS[k], v, L.momentSmooth, mdt); v = MS[k].x; }
+      post[ch[k]] = (post[ch[k]] || 0) + v;
+    }
+    // head: momentCenter removes each moment's average head offset (switching moments otherwise swung the head ~10 deg
+    // in 0.25 s), momentYaw scales its turns (it presents to an audience), momentHeadSmooth springs it like the head
+    const hm = (M) => { if (!L.momentCenter || !M) return [0, 0, 0]; if (!M.hMean) { const h = M.m.h; M.hMean = [0, 1, 2].map((k) => h.reduce((a, f) => a + f[k], 0) / h.length); } return M.hMean.map((v) => v * L.momentCenter); };
+    const ch2 = at(this.mom, 'h'), ph = this.momPrev ? at(this.momPrev, 'h') : null, c0 = hm(this.mom), c1 = hm(this.momPrev);
+    const yawK = [L.momentYaw, 1, 1];
+    let mh = ch2 ? ch2.map((x, k) => L.momentHead * yawK[k] * (xf * (x - c0[k]) + (ph ? (1 - xf) * (ph[k] - c1[k]) : 0))) : null;
+    if (L.momentHeadSmooth > 0) {
+      const S = this.momHeadS || (this.momHeadS = [0, 1, 2].map(() => ({ x: 0, v: 0 })));
+      S.forEach((sp, k) => spring(sp, mh ? mh[k] : 0, L.momentHeadSmooth, Math.min(0.05, t - (this.momHeadT ?? t))));
+      this.momHeadT = t; mh = S.map((sp) => sp.x);
+    }
+    this.momHead = mh;
+    const cg = this.mom.m.g ? at(this.mom, 'g') : null, pg = this.momPrev?.m.g ? at(this.momPrev, 'g') : null;
+    this.momGaze = cg && L.momentGaze > 0 ? cg.map((x, k) => L.momentGaze * (xf * x + (pg ? (1 - xf) * pg[k] : 0))) : null;
+    const cl = this.mom.m.l, pl = this.momPrev?.m.l;
+    if (cl && L.momentLid > 0) {
+      const u = Math.min(cl.length - 1, (t - this.mom.t0) * fps), i = Math.floor(u), v = cl[i] + ((cl[i + 1] ?? cl[i]) - cl[i]) * (u - i);
+      let w = xf * v;
+      if (pl) { const u2 = Math.min(pl.length - 1, (t - this.momPrev.t0) * fps); w += (1 - xf) * pl[Math.floor(u2)]; }
+      post.eyeBlinkLeft = (post.eyeBlinkLeft || 0) + L.momentLid * w; post.eyeBlinkRight = (post.eyeBlinkRight || 0) + L.momentLid * w;
+    }
+  }
+
   setManualChannels(values = {}) {
     this.manualChannels = Object.fromEntries(Object.entries(values).filter(([,v]) => Number.isFinite(v)).map(([k,v]) => [k, clamp(v, -1, 1)]));
   }
@@ -823,7 +940,7 @@ export class AndroidFace {
   }
 
   /** Approximate text-timed articulation. No audio synchronization is claimed. */
-  say(text, dur = 0.15) { this.speechMotion.enqueue(text, this.time, dur); }
+  say(text, dur = 0.15) { this.lastSay = this.time; this.speechMotion.enqueue(text, this.time, dur); }
   clearSpeech(hard = false) { this.speechMotion.clear({ hard }); if (hard) this.speechFrame = null; }
 
   setActivity({ writing = false } = {}) {
@@ -835,36 +952,42 @@ export class AndroidFace {
   /** Conversational beat while writing: 'comma' | 'period' | 'exclaim' | 'question' | 'emphasis'. */
   beat(kind) {
     const t = this.time, R = this.rand;
+    if (!this.lively.beats) return;   // diagnostics: beats off
     // A punctuation burst should not pile up nods, eyebrow flashes and mouth presses.
-    if (t - this.lastBeat < (kind === 'emphasis' ? 0.9 : 0.42)) return;
+    if (t - this.lastBeat < (kind === 'emphasis' ? this.lively.beatGap : 0.42)) return;
     this.lastBeat = t;
+    if (kind === 'emphasis') this.momKick = true;   // the next performance moment should start on this stress
+    if (this.pulse && (kind === 'emphasis' || kind === 'exclaim' || kind === 'question')) this.pulse.target = 1.05;   // phrasing peak
+    if (this.pulse && kind === 'period') this.pulse.target = 0.5;                                                   // sentence end: ease off
     this.overlays = this.overlays.slice(-7);
+    const flash = kind === 'emphasis' && R() < this.lively.raiseEmph;
+    if (flash) { this._beat({ t0: t, a: 0.05, h: 0.14, r: 0.3, ch: { browInnerUp: 0.12, browOuterUp: 0.16 } }); return; }   // an eyebrow flash
     if (this.perf?.kind === 'anger' && this.intent.x > 0.3) {
       // deliver: firm, sparse accents; no nods on commas, no inquisitive tilt, no smile
       const hot = this.perf.variant === 'hot';
       if (kind === 'comma') return;
-      if (kind === 'period') { if (R() < 0.6) this.overlays.push({ t0: t, a: 0.08, h: 0.12, r: 0.35, head: { pitch: -1.1 }, ch: { mouthPress: 0.14 } }); return; }
-      if (kind === 'question') { this.overlays.push({ t0: t, a: 0.1, h: 0.3, r: 0.4, head: { pitch: 1.0 }, ch: { browDown: 0.12 } }); return; }
-      this.overlays.push({ t0: t, a: 0.05, h: hot ? 0.2 : 0.14, r: 0.3, ch: { browDown: hot ? 0.3 : 0.2, eyeSquint: 0.1, mouthPress: 0.1 }, head: { pitch: hot ? -2.0 : -1.2, z: hot ? 0.005 : 0.003 } });
+      if (kind === 'period') { if (R() < 0.6) this._beat({ t0: t, a: 0.08, h: 0.12, r: 0.35, head: { pitch: -1.1 }, ch: { mouthPress: 0.14 } }); return; }
+      if (kind === 'question') { this._beat({ t0: t, a: 0.1, h: 0.3, r: 0.4, head: { pitch: 1.0 }, ch: { browDown: 0.12 } }); return; }
+      this._beat({ t0: t, a: 0.05, h: hot ? 0.2 : 0.14, r: 0.3, ch: { browDown: hot ? 0.3 : 0.2, eyeSquint: 0.1, mouthPress: 0.1 }, head: { pitch: hot ? -2.0 : -1.2, z: hot ? 0.005 : 0.003 } });
       return;
     }
     const [dom, fd] = this._dominant();
     const strong = fd > 0.3;
     // feeling-coloured variants of the beat
-    if (kind === 'emphasis' && strong && EMPHASIS[dom]) { this.overlays.push({ t0: t, ...EMPHASIS[dom] }); return; }
+    if (kind === 'emphasis' && strong && EMPHASIS[dom]) { this._beat({ t0: t, ...EMPHASIS[dom] }); return; }
     if (kind === 'exclaim' && strong) {
-      if (dom === 'anger') { this.overlays.push({ t0: t, a: 0.05, h: 0.2, r: 0.4, ch: { browDown: 0.2, eyeWide: 0.1, mouthPress: 0.12 }, head: { pitch: -1.2, z: 0.004 } }); return; }
+      if (dom === 'anger') { this._beat({ t0: t, a: 0.05, h: 0.2, r: 0.4, ch: { browDown: 0.2, eyeWide: 0.1, mouthPress: 0.12 }, head: { pitch: -1.2, z: 0.004 } }); return; }
       if (dom === 'joy' && this.reg < 0.4 && R() < 0.35 * fd) { this._chuckle(fd * 0.6); return; }
-      if (dom === 'fear') { this.overlays.push({ t0: t, a: 0.04, h: 0.2, r: 0.4, ch: { eyeWide: 0.2, browInnerUp: 0.2, mouthStretch: 0.08 }, head: { z: -0.004 } }); return; }
+      if (dom === 'fear') { this._beat({ t0: t, a: 0.04, h: 0.2, r: 0.4, ch: { eyeWide: 0.2, browInnerUp: 0.2, mouthStretch: 0.08 }, head: { z: -0.004 } }); return; }
     }
     if (kind === 'period') {
-      if (this.reg > 0.3 && dom !== 'anger' && R() < 0.4) this._socialSmile(0.16 + 0.12 * this.reg, 0.5 + 0.5 * R(), t + 0.1);
+      if (this.reg > 0.3 && dom !== 'anger' && R() < 0.4 * this.lively.socialSmile) this._socialSmile(0.16 + 0.12 * this.reg, 0.5 + 0.5 * R(), t + 0.1);
       if (strong && dom === 'sadness') {
-        this.overlays.push({ t0: t, a: 0.25, h: 0.35, r: 0.9, head: { pitch: -2.6 }, ch: { browInnerUp: 0.1, mouthPress: 0.08 } });
-        if (R() < 0.6) { this.blink.next = t + 0.15; this.blink.slowNext = true; }
+        this._beat({ t0: t, a: 0.25, h: 0.35, r: 0.9, head: { pitch: -2.6 }, ch: { browInnerUp: 0.1, mouthPress: 0.08 } });
+        if (R() < 0.35) { this.blink.next = t + 0.15; this.blink.slowNext = true; }
         return;
       }
-      if (strong && dom === 'joy') { this.overlays.push({ t0: t, a: 0.15, h: 0.3, r: 0.6, head: { pitch: -1.0 }, ch: { mouthSmile: 0.1, cheekSquint: 0.06 } }); return; }
+      if (strong && dom === 'joy') { this._beat({ t0: t, a: 0.15, h: 0.3, r: 0.6, head: { pitch: -1.0 }, ch: { mouthSmile: 0.1, cheekSquint: 0.06 } }); return; }
     }
     const ov = {
       comma: { a: 0.08, h: 0.06, r: 0.3, head: { pitch: -0.7 } },
@@ -875,8 +998,39 @@ export class AndroidFace {
     }[kind];
     if (!ov) return;
     if (kind === 'question' && dom === 'curiosity' && strong) { ov.head = { ...ov.head, roll: ov.head.roll * 1.8 }; ov.ch = { ...ov.ch, browOuterUpL: 0.18 }; }
-    this.overlays.push({ t0: t, ...ov });
-    if ((kind === 'period' && R() < 0.45) || (kind === 'question' && R() < 0.25)) this.blink.next = t + 0.12;
+    this._beat({ t0: t, ...ov });
+    if ((kind === 'period' && R() < 0.15) || (kind === 'question' && R() < 0.08)) this.blink.next = t + 0.12;
+  }
+
+  /** A conversational beat's overlay, scaled for liveliness: brow and eye channels by beatBrow, head by beatHead,
+   *  and a symmetric brow movement made one-sided (the other side moves 1 - asym * (0.4..1) as much). */
+  _beat(o) {
+    const L = this.lively, side = this.rand() < 0.5 ? 'L' : 'R', other = side === 'L' ? 'R' : 'L';
+    const k = 1 - L.asym * (0.4 + 0.6 * this.rand()), ch = {};
+    for (const [c, v] of Object.entries(o.ch || {})) {
+      const g = /^brow(Inner|Outer)Up/.test(c) ? L.beatRaise : c.startsWith('brow') || c.startsWith('eye') ? L.beatBrow : 1;
+      if (c.startsWith('brow') && !/(L|R|Left|Right)$/.test(c)) { ch[c + side] = (ch[c + side] || 0) + v * g; ch[c + other] = (ch[c + other] || 0) + v * g * k; }
+      else ch[c] = (ch[c] || 0) + v * g;
+    }
+    const head = Object.fromEntries(Object.entries(o.head || {}).map(([a, v]) => [a, v * L.beatHead]));
+    // beatHold: brow beats rise and fall slower and hold longer; beatMerge: a stress that lands while the brows are still
+    // up holds them up (to at most 2.5 s x beatMerge) instead of a new flick -- the actors hold a raise across a phrase
+    const brow = Object.fromEntries(Object.entries(ch).filter(([c]) => c.startsWith('brow')));
+    if ((L.beatHold !== 1 || L.beatMerge > 0) && Object.keys(brow).length) {
+      const rest = Object.fromEntries(Object.entries(ch).filter(([c]) => !c.startsWith('brow')));
+      const P = this._browBeat, t = o.t0, hold = o.h * L.beatHold;
+      if (L.beatMerge > 0 && P && this.overlays.includes(P) && t < P.t0 + P.a + P.h + 0.5 * P.r && t + hold - P.t0 < 2.5 * L.beatMerge) {
+        P.h = Math.max(P.h, t - P.t0 - P.a + hold);
+        for (const [c, v] of Object.entries(brow)) P.ch[c] = Math.max(P.ch[c] || 0, v);
+      } else {
+        const sl = Math.sqrt(L.beatHold);
+        this._browBeat = { t0: t, a: o.a * sl, h: hold, r: o.r * sl, ch: brow };
+        this.overlays.push(this._browBeat);
+      }
+      this.overlays.push({ ...o, ch: rest, head });
+      return;
+    }
+    this.overlays.push({ ...o, ch, head });
   }
 
   /** Social reactions: 'greet' | 'listen' | 'think' | 'done'. */
@@ -946,10 +1100,11 @@ export class AndroidFace {
     this.lastLeak = { t, emo: e, covered: !!cover };
     if (!cover) return;
     const end = 0.04 + dur;
-    const ch = e === 'anger' ? { mouthPress: 0.26, mouthRollLower: 0.08, mouthShrugLower: 0.08 }       // caught, and swallowed
+    const smileOver = e !== 'anger' && this.rand() < Math.min(1, this.lively.socialSmile);
+    const ch = !smileOver ? { mouthPress: 0.26, mouthRollLower: 0.08, mouthShrugLower: 0.08 }           // caught, and swallowed
       : { mouthPress: 0.22, mouthSmileL: 0.15, mouthSmileR: 0.11, mouthRollLower: 0.06 };               // caught, and smiled over
     this.overlays.push({ t0: t + end * 0.8, a: 0.12, h: 0.35 + 0.3 * this.rand(), r: 0.45, post: true, ch, head: { pitch: -0.8 } });
-    if (this.rand() < 0.5) this.blink.next = t + end + 0.05;
+    if (this.rand() < 0.25) this.blink.next = t + end + 0.05;
     if (this.rand() < 0.2) {
       const side = this.rand() < 0.5 ? -1 : 1;
       this.overlays.push({ t0: t + end, a: 0.06, h: 0.4 + 0.4 * this.rand(), r: 0.2, gaze: [side * (6 + 6 * this.rand()), -4 - 4 * this.rand()] });
@@ -1155,17 +1310,43 @@ export class AndroidFace {
     for (const c of Object.keys(CHANNELS)) tgt[c] = 0;
     const add = (name, v) => route(name, v, tgt);
     const applyProto = (e, amt, gain = 1) => {
-      for (const [ch, w, lo, hi] of PROTOS[e]) {
+      for (const [ch, w, lo, hi0] of PROTOS[e]) {
+        // angerHi: where the anger frown reaches full (pushed anger reads 0.8-0.95, so 0.85 keeps it whole and only
+        // grades the weak anger the readout finds in ordinary dramatic lines)
+        const hi = e === 'anger' && ch === 'browDown' && this.lively.angerHi > 0 ? this.lively.angerHi : hi0;
         // lo = 0: ~linear engagement up to `hi`; lo > 0: this AU only joins at higher intensity
         let k = w * (lo === 0 ? clamp(amt / hi) * (1.5 - 0.5 * clamp(amt / hi)) : smooth(lo, hi, amt));
         if (e === 'joy' && (ch === 'cheekSquint' || ch === 'cheekRaiser' || ch === 'eyeSquint')) {
           const duch = this.duchenne ?? smooth(0.1, 0.55, amt);   // polite (AU12 only) at low joy -> Duchenne
           k *= 0.2 + 0.8 * duch;
         }
-        add(ch, k * gain);
+        // anger keeps its full brow whenever it is the leading feeling (a push, a real anger scene); only anger that is
+        // a minor part of a mixed reading is softened
+        const angerLead = smooth(0.75, 0.95, (felt.anger || 0) / fmax);
+        const L = this.lively;
+        // fearLeadBrow: when fear clearly leads, the anger and sadness read alongside it (a fear push reads anger ~0.7)
+        // don't knit the brows -- the actors' fear raises them and barely lowers them (brow-lower range 0.10-0.17)
+        const fearLead = L.fearLeadBrow !== 1 && (felt.fear || 0) >= fmax - 1e-6 ? smooth(0, 0.25, ((felt.fear || 0) - Math.max(felt.anger || 0, felt.sadness || 0)) / fmax) : 0;
+        let bk = ch === 'browDown' ? (e === 'sadness' ? L.griefBrow : e === 'fear' ? (L.fearBrow >= 0 ? L.fearBrow : L.griefBrow) : e === 'anger' ? lerp(L.angerBrow, 1, angerLead) : 1) : 1;
+        if (ch === 'browDown' && fearLead > 0 && (e === 'anger' || e === 'sadness')) bk *= lerp(1, L.fearLeadBrow, fearLead);
+        // fearStretch: fear's lips drawn back (AU20); the actors' fear stretches them ~0.4x as much as this proto did
+        if (e === 'fear' && ch === 'mouthStretch') bk *= L.fearStretch;
+        if (ch === 'browDown' && this.dbgBrow) this.dbgBrow[e] = (this.dbgBrow[e] || 0) + k * bk * gain;
+        add(ch, k * bk * gain);
       }
     };
-    for (const e of EMOTIONS) if (felt[e] > 1e-3) applyProto(e, felt[e]);
+    // phrasing: the pulse is 1 on a stressed word and eases toward 0.6 while talking (0.75 when quiet)
+    const PU = this.pulse || (this.pulse = { x: 1, v: 0, target: 1 });
+    const talkingNow = t - (this.lastSay ?? -10) < 0.8;
+    PU.target += ((talkingNow ? 0.6 : 0.75) - PU.target) * Math.min(1, dt / 1.4);
+    spring(PU, PU.target, 5, dt);
+    const pulse = 1 - this.lively.emoPulse * (1 - clamp(PU.x, 0, 1.2));
+    const fmax = Math.max(1e-3, ...EMOTIONS.map((e) => felt[e] || 0));
+    const sharp = (v) => (this.lively.emoSharpen > 0 ? v * Math.pow(v / fmax, this.lively.emoSharpen) : v);
+    const feltTotal = EMOTIONS.reduce((a, e) => a + sharp(felt[e] || 0), 0);
+    const share = this.lively.emoNorm > 0 && feltTotal > 1 ? Math.pow(feltTotal, -this.lively.emoNorm) : 1;
+    this.dbgBrow = {};   // diagnostics: each feeling's share of the brow-lower target this frame
+    for (const e of EMOTIONS) if (felt[e] > 1e-3) applyProto(e, sharp(felt[e]) * share * pulse * this.lively.emoScale);
     // Lab/manual local control is additive and channel-level, so artists can diagnose the rig without inventing a new emotion label.
     for (const [ch, v] of Object.entries(this.manualChannels)) route(ch, v, tgt);
 
@@ -1177,6 +1358,8 @@ export class AndroidFace {
       const k = smooth(0.05, 0.3, lo) * smooth(0.25, 0.65, lo / hi);
       if (k < 0.02) continue;
       for (const [c, m] of Object.entries(B.mul)) scaleCh(tgt, c, lerp(1, m, k));
+      // hurtBrow: anger carried with grief reads as anguish, not a scowl (pure anger, pushed or played, has ~no sadness)
+      if (B.name === 'hurt' && this.lively.hurtBrow !== 1) scaleCh(tgt, 'browDown', lerp(1, this.lively.hurtBrow, k));
       const amt = k * Math.min(1, (a + b) * 0.75);
       for (const [c, w] of Object.entries(B.add)) add(c, w * amt);
       if (k > blendK) { blendK = k; blendName = B.name; }
@@ -1196,6 +1379,7 @@ export class AndroidFace {
       else { add('mouthSmileL', 0.07 * R); add('mouthSmileR', 0.05 * R); }                                       // a polite smile
     }
     const post = {};   // fast components added after the muscle springs (micro-expressions, tremors, gasps)
+    this.dbg = { tgt, post };   // diagnostics: this frame's spring targets and post-spring additions
     if (idle && this.options.micro && !this.reliefTake && R > 0.2 && neg > 0.12) {
       if (t >= this.leakNext) {
         const [e, v] = this._dominant(NEG);
@@ -1233,6 +1417,7 @@ export class AndroidFace {
     // breathing (computed before the AU springs so it can flare the nostrils / part the lips)
     this._breathe(dt, t, add, post);
     this._speak(dt, t, post);
+    this._moment(t, post);
 
     // timed reactions and conversational beats
     const ovHead = { pitch: 0, yaw: 0, roll: 0, z: 0 };
@@ -1277,10 +1462,11 @@ export class AndroidFace {
     // ---- springs per region (asymmetric onset / offset), asymmetry, soft caps
     for (const c of Object.keys(CHANNELS)) {
       const [on, off] = REGION_TIMES[CHANNELS[c]];
+      const sl = CHANNELS[c] === 'brow' ? this.lively.browSlow : 1;
       const s = this.ch[c];
       const target = Math.max(0, tgt[c] * this.asym[c]);
       const rising = target > s.x;
-      spring(s, target, 3.36 / (rising ? on : off), dt);
+      spring(s, target, 3.36 / ((rising ? on : off) * sl), dt);
     }
 
     // micro-expression flash (bypasses the slow springs): ~40 ms attack, short hold, ~120 ms decay
@@ -1310,6 +1496,9 @@ export class AndroidFace {
       v = v <= 0 ? 0 : cap * (1 - Math.exp(-v / cap * 1.25)) / (1 - Math.exp(-1.25));   // soft cap, ~linear at small v
       this.out[c] = Math.min(v, cap);
     }
+    if (this.lively.raiseGain !== 1) for (const c of ['browInnerUpLeft', 'browInnerUpRight', 'browOuterUpLeft', 'browOuterUpRight']) this.out[c] *= this.lively.raiseGain;
+    // outerGain: the outer brow raise on its own (the tracker barely reads it below ~0.3 on this face; actors' 0.58 range vs ours 0.32)
+    if (this.lively.outerGain !== 1) for (const c of ['browOuterUpLeft', 'browOuterUpRight']) this.out[c] *= this.lively.outerGain;
     // A directed eye closure must not fight the fear eye-widen morph.
     // Only the new relief take uses this ownership rule; other takes are unchanged.
     if(this.reliefTake?.sample) {
@@ -1460,7 +1649,8 @@ export class AndroidFace {
 
   _speak(dt, t, post) {
     const f = this.felt || {};
-    this.speechGain = clamp(1 + .25 * Math.max(0, this.arousal || 0) - .2 * (f.sadness || 0) - .25 * (f.calm || 0), .55, 1.35);
+    // (fearSpeech: frightened speech is held and small -- the actors' mouths moved ~half as much in fear scenes)
+    this.speechGain = clamp(1 + .25 * Math.max(0, this.arousal || 0) - .2 * (f.sadness || 0) - .25 * (f.calm || 0) - this.lively.fearSpeech * (f.fear || 0), this.lively.fearSpeech > 0 ? .45 : .55, 1.35);
     this.speechFrame = this.speechMotion.sample(dt, t);
   }
 
@@ -1497,16 +1687,19 @@ export class AndroidFace {
       let slow = f.sadness * 0.5 + f.calm * 0.3;
       if (b.slowNext) { b.slowNext = false; b.amp = 1; slow += 1.4; }      // a long, heavy blink (sadness, at a sentence end)
       b.dur = [0.075 + 0.02 * this.rand() + 0.03 * slow, 0.03 + 0.04 * this.rand() + 0.08 * slow, 0.16 + 0.07 * this.rand() + 0.1 * slow];
-      // rate: ~17/min at rest; rises with arousal, falls while concentrating on text; each feeling has its own
-      // effect (the angry stare and rapt curiosity suppress blinking, fear raises it)
+      // rate: ~12.5/min at rest plus fewer beat-, leak- and gaze-evoked blinks: ~11/min overall from the face's own
+      // blink log, the median of the film performances it was tuned on (a face tracker over-counts the porcelain
+      // lids: it read 15-28 'blinks'/min with blinking switched off); rises with arousal, falls while concentrating on text; each feeling has
+      // its own effect (the angry stare and rapt curiosity suppress blinking, fear raises it)
       let mul = 0;
-      for (const e of EMOTIONS) mul += Math.log(BLINK_MUL[e]) * Math.min(1, f[e]);
-      const rate = clamp(17 * Math.exp(mul) * (1 + 0.3 * Math.max(0, this.arousal)) * (1 - 0.25 * clamp(this.writingAmt.x)), 5, 38);
+      // (fearBlink > 0 replaces fear's multiplier: the actors' fear blinks ~13.5/min, more than at rest)
+      for (const e of EMOTIONS) mul += Math.log(e === 'fear' && this.lively.fearBlink > 0 ? this.lively.fearBlink : BLINK_MUL[e]) * Math.min(1, f[e]);
+      const rate = clamp(12.5 * Math.exp(mul) * (1 + 0.3 * Math.max(0, this.arousal)) * (1 - 0.25 * clamp(this.writingAmt.x)), 5, 38);
       const mean = 60 / rate;
       // log-normal-ish interval
       const g = Math.exp((this.rand() + this.rand() + this.rand() - 1.5) * 0.75);
       b.next = t + Math.max(0.7, mean * g);
-      if (this.rand() < 0.12) b.pending = t + b.dur[0] + b.dur[1] + b.dur[2] * 0.6 + 0.05; // double blink
+      if (this.rand() < 0.06) b.pending = t + b.dur[0] + b.dur[1] + b.dur[2] * 0.6 + 0.05; // double blink
     }
     if (b.pending && t >= b.pending) { b.t0 = t; b.pending = null; b.amp = 0.85 + 0.15 * this.rand(); }
     const u = t - b.t0;
@@ -1552,9 +1745,9 @@ export class AndroidFace {
     // glances down at the text while writing
     const G = this.glance;
     const held = Math.max(this.intent.x, this.externalIntent.x) > 0.3;
-    if (idle && W > 0.5 && this.gazeMode === 'camera' && !held) {
+    if (idle && W > 0.5 && this.gazeMode === 'camera' && !held && this.options.textGlances !== false) {
       if (!G.active && t >= G.next) { G.active = true; G.until = t + 0.5 + 0.8 * this.rand(); }
-      if (G.active && t >= G.until) { G.active = false; G.next = t + 6 + 8 * this.rand(); }
+      if (G.active && t >= G.until) { G.active = false; G.next = t + (6 + 8 * this.rand()) * this.lively.glanceGap; }   // glanceGap: spacing (each glance down also lowers the lids)
     } else if (G.active) G.active = false;
     if (G.active) {
       const tt = this.options.textTarget;
@@ -1586,14 +1779,17 @@ export class AndroidFace {
     if (idle) {
       if (t >= E.nextShift) {
         const r = this.rand();
-        const awayP = 0.06 + 0.12 * f.sadness + 0.1 * f.disgust + 0.05 * f.fear - 0.06 * f.anger - 0.03 * f.joy + (W > 0.5 ? -0.03 : 0.03);
+        // fear freeze (LIVELY.fearFreeze): the actors' fear holds the eyes still on the threat (59-82 shifts/min), not darting
+        const fz = this.lively.fearFreeze * smooth(0.25, 0.6, f.fear) * (f.fear >= Math.max(f.anger, f.sadness, f.joy) ? 1 : 0.5);
+        // (a performance moment steering the eyes takes over most of the look-aways)
+        const awayP = (0.06 + 0.12 * f.sadness + 0.1 * f.disgust + 0.05 * f.fear - 0.06 * f.anger - 0.03 * f.joy + (W > 0.5 ? -0.03 : 0.03)) * (this.momGaze ? 0.3 : 1) * (1 - 0.5 * fz);
         const scanSide = () => [(E.offset[0] > 0 ? -1 : 1) * (9 + 9 * this.rand()) * DEG, (this.rand() - 0.4) * 5 * DEG];
         if (E.scanN > 0) {
           // fear: hypervigilance -- quick darts to the sides as if checking for a threat, then freeze on the viewer
           E.scanN--;
           if (E.scanN === 0) { E.offset = [0, -0.5 * DEG]; E.nextShift = t + 1.2 + 1.6 * this.rand(); this.blink.next = Math.max(this.blink.next, t + 0.9); }
           else { E.offset = scanSide(); E.nextShift = t + 0.18 + 0.22 * this.rand(); }
-        } else if (f.fear > 0.3 && f.fear >= Math.max(f.anger, f.sadness, f.joy) && r < (0.04 + 0.08 * f.fear) * (this.perf?.kind === 'fear' ? 0.25 : 1) && !G.active) {
+        } else if (f.fear > 0.3 && f.fear >= Math.max(f.anger, f.sadness, f.joy) && r < (0.04 + 0.08 * f.fear) * (this.perf?.kind === 'fear' ? 0.25 : 1) * (1 - 0.8 * fz) && !G.active) {
           E.scanN = 2 + Math.floor(this.rand() * 2);
           E.offset = scanSide();
           E.nextShift = t + 0.18 + 0.22 * this.rand();
@@ -1604,14 +1800,14 @@ export class AndroidFace {
           E.nextShift = t + 0.8 + 1.4 * this.rand();
         } else {
           // tiny switches between the viewer's eyes / mouth (anger: a hard, unmoving stare)
-          const stare = 1 - 0.7 * Math.min(1, f.anger);
+          const stare = 1 - 0.7 * Math.min(1, f.anger + fz);
           E.offset = [(this.rand() - 0.5) * 1.8 * DEG * stare, (this.rand() - 0.6) * 1.2 * DEG * stare - f.sadness * 5 * DEG];
-          const rate = 1 + 1.2 * f.fear + 0.8 * f.curiosity + 0.4 * f.surprise - 0.5 * f.calm - 0.6 * f.anger;
+          const rate = (1 + 1.2 * f.fear * (1 - fz) + 0.8 * f.curiosity + 0.4 * f.surprise - 0.5 * f.calm - 0.6 * f.anger) * (1 - 0.5 * fz);
           E.nextShift = t + (0.8 + 2.2 * this.rand()) / Math.max(0.35, rate);
         }
       }
-      yaw += E.offset[0] + (this.ovGaze ? this.ovGaze[0] : 0);
-      pitch += E.offset[1] + (this.ovGaze ? this.ovGaze[1] : 0);
+      yaw += E.offset[0] + (this.ovGaze ? this.ovGaze[0] : 0) + (this.momGaze ? this.momGaze[0] * DEG : 0);
+      pitch += E.offset[1] + (this.ovGaze ? this.ovGaze[1] : 0) + (this.momGaze ? this.momGaze[1] * DEG : 0);
     } else {
       pitch -= f.sadness * 5 * DEG;
     }
@@ -1634,7 +1830,7 @@ export class AndroidFace {
         E.t0 = t;
         E.dur = (0.021 + 0.0022 * amp) * (1 + 0.6 * f.sadness + 0.3 * f.calm);   // low arousal: slower saccades
         E.lastSacc = t;
-        if (amp > 9 && this.options.blinks && this.rand() < 0.35 && t - this.blink.t0 > 0.5) this.blink.next = t; // gaze-evoked blink
+        if (amp > 9 && this.options.blinks && this.rand() < 0.08 && t - this.blink.t0 > 0.5) this.blink.next = t; // gaze-evoked blink
       }
     }
     const u = clamp((t - E.t0) / E.dur);
@@ -1670,10 +1866,18 @@ export class AndroidFace {
     let breathP = 0, breathY = 0;
     if (idle) {
       const slow = 1 - 0.45 * f.calm;
-      const amp = (0.7 + 0.8 * Math.max(0, this.arousal) + 0.3 * f.curiosity) * (1 - 0.4 * f.calm) * (1 - 0.75 * Math.max(this.intent.x, this.externalIntent.x)) * this.motionStyle.amplitude * this.style.amp.x;
+      const amp = this.lively.headNoise * (0.7 + 0.8 * Math.max(0, this.arousal) + 0.3 * f.curiosity) * (1 - 0.4 * f.calm) * (1 - 0.75 * Math.max(this.intent.x, this.externalIntent.x)) * this.motionStyle.amplitude * this.style.amp.x;
       pitch += amp * 1.1 * this.noise.fbm(t * 0.21 * slow + 100, 3);
       yaw += amp * 1.4 * this.noise.fbm(t * 0.17 * slow + 200, 3);
       roll += amp * 0.8 * this.noise.fbm(t * 0.19 * slow + 300, 3);
+      // talking: the head moves with the phrasing (faster and larger than the idle drift), less when holding
+      const spk = Math.max(0, 1 - (t - (this.lastSay ?? -10)) / 0.8);
+      if (spk > 0 && this.lively.speechHead > 0) {
+        const a = this.lively.speechHead * spk * (1 + 0.6 * Math.max(0, this.arousal)) * (1 - 0.6 * Math.max(this.intent.x, this.externalIntent.x));
+        pitch += a * 1.2 * this.noise.fbm(t * 0.9 + 400, 2);
+        yaw += a * 1.6 * this.noise.fbm(t * 0.7 + 500, 2);
+        roll += a * 0.9 * this.noise.fbm(t * 0.8 + 600, 2);
+      }
       // fear: small tremor
       pitch += f.fear * 0.25 * this.noise.at(t * 6.1 + 9);
       yaw += f.fear * 0.25 * this.noise.at(t * 5.3 + 19);
@@ -1706,7 +1910,9 @@ export class AndroidFace {
 
     // split rotation between the neck (35%) and head (65%) joints
     const e = this._tmpE;
-    const P = (H.pitch.x + breathP) * DEG, Y = H.yaw.x * DEG, R = H.roll.x * DEG;
+    const mh = this.momHead || [0, 0, 0];   // a performance moment's head movement (after the springs: its own timing)
+    const P = (H.pitch.x + breathP + mh[1]) * DEG, Y = (H.yaw.x + mh[0]) * DEG, R = (H.roll.x + mh[2]) * DEG;
+    this.headOut = [Y / DEG, P / DEG, R / DEG];   // final head angles (deg), for diagnostics
     e.set(-P * 0.35, Y * 0.35, -R * 0.35, 'YXZ');
     this.neckBone.quaternion.copy(this.neckRestQ).multiply(this._tmpQ.setFromEuler(e));
     e.set(-P * 0.65, Y * 0.65, -R * 0.65, 'YXZ');
@@ -1753,7 +1959,8 @@ export class AndroidFace {
     const up = Math.max(0, pitch) / (18 * DEG), down = Math.max(0, -pitch) / (24 * DEG);
     const yl = yaw / (28 * DEG);
     this.out.eyeLookUpLeft = this.out.eyeLookUpRight = clamp(up) * 0.9;
-    this.out.eyeLookDownLeft = this.out.eyeLookDownRight = clamp(down) * 0.9;
+    // lidFollow: how far the lids follow a downward look (the face tracker reads this face's lowered lid as a squint)
+    this.out.eyeLookDownLeft = this.out.eyeLookDownRight = clamp(down) * this.lively.lidFollow;
     // subject's left eye looking to the subject's left (+yaw) = out
     this.out.eyeLookOutLeft = clamp(yl); this.out.eyeLookInLeft = clamp(-yl);
     this.out.eyeLookInRight = clamp(yl); this.out.eyeLookOutRight = clamp(-yl);
