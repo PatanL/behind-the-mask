@@ -770,6 +770,7 @@ async def startup():
             asyncio.ensure_future(c.market.seed())
     asyncio.ensure_future(explore_loop())
     asyncio.ensure_future(lp_pump.sol_price_loop())
+    asyncio.ensure_future(lp_pump.chain_loop(lambda: [c.market for c in COINS.values()]))   # exact reserves; graduated coins' prices
     asyncio.ensure_future(state_loop())
     asyncio.ensure_future(ping_loop())
 

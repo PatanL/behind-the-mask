@@ -33,6 +33,9 @@ PUMP_COIN = os.environ.get("LP_PUMP_COIN_API", "https://frontend-api-v3.pump.fun
 RPC = os.environ.get("LP_RPC", "https://api.mainnet-beta.solana.com")
 SITE = os.environ.get("LP_SITE", "https://steerai.live")       # a launched coin's website: its android's page
 PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+PUMP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"     # PumpSwap: where a coin trades once its curve completes
+WSOL = "So11111111111111111111111111111111111111112"
+AMM_CREATOR_FEE_BPS = float(os.environ.get("LP_AMM_CREATOR_FEE_BPS", "5"))   # the coin creator's PumpSwap fee (set to the current rate)
 SETTINGS = Path(os.environ.get("LP_STATE", "runs/launchpad")) / "pump.json"
 
 
@@ -46,20 +49,75 @@ def settings() -> dict:
     return {**d, "treasury": os.environ.get("LP_TREASURY") or d.get("treasury") or "", "alt": os.environ.get("LP_ALT") or d.get("alt") or ""}
 
 
-def curve_address(mint: str) -> str:
-    return find_program_address([b"bonding-curve", b58decode(mint)], PUMP_PROGRAM)
+def pool_address(mint: str) -> str:
+    """A graduated coin's canonical PumpSwap pool (index 0, quoted in SOL; created by pump.fun's pool authority)."""
+    auth = find_program_address([b"pool-authority", b58decode(mint)], PUMP_PROGRAM)
+    return find_program_address([b"pool", (0).to_bytes(2, "little"), b58decode(auth), b58decode(mint), b58decode(WSOL)], PUMP_AMM)
 
 
-async def curve(mint: str) -> dict | None:
-    """A coin's bonding curve on chain: reserves, whether it has graduated, and its creator (None if there's none)."""
+async def accounts(addresses: list[str], encoding: str = "base64") -> list:
+    """getMultipleAccounts, 100 at a time -> the accounts' values (None for a missing one)."""
+    out = []
     async with httpx.AsyncClient(timeout=15) as cl:
-        r = await cl.post(RPC, json={"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo", "params": [curve_address(mint), {"encoding": "base64", "commitment": "confirmed"}]})
-    v = (r.json().get("result") or {}).get("value")
+        for i in range(0, len(addresses), 100):
+            r = await cl.post(RPC, json={"jsonrpc": "2.0", "id": 1, "method": "getMultipleAccounts",
+                                         "params": [addresses[i:i + 100], {"encoding": encoding, "commitment": "confirmed"}]})
+            out += (r.json().get("result") or {}).get("value") or [None] * len(addresses[i:i + 100])
+    return out
+
+
+def parse_curve(v: dict | None) -> dict | None:
     if not v or v.get("owner") != PUMP_PROGRAM:
         return None
     b = base64.b64decode(v["data"][0])
     u = lambda o: int.from_bytes(b[o:o + 8], "little")
     return {"vtok": u(8) / 1e6, "vsol": u(16) / 1e9, "complete": bool(b[48]), "creator": b58encode(b[49:81])}
+
+
+async def chain_loop(markets):
+    """Prices from the chain itself: graduated coins' PumpSwap reserves every 5 s (the trade feed doesn't carry PumpSwap
+    trades), and every coin's bonding curve once a minute (exact reserves; notices a graduation). markets() -> the
+    PumpFunMarkets to follow."""
+    last_curves = 0.0
+    while True:
+        await asyncio.sleep(5)
+        try:
+            ms = [m for m in markets() if isinstance(m, PumpFunMarket)]
+            if not ms:
+                continue
+            if time.time() - last_curves > 60:
+                last_curves = time.time()
+                for m, v in zip(ms, await accounts([curve_address(m.mint) for m in ms])):
+                    c = parse_curve(v)
+                    if c:
+                        m.on_curve(c)
+            grads = [m for m in ms if m.complete]
+            need = [m for m in grads if m.pool_tas is None]
+            if need:
+                for m, v in zip(need, await accounts([pool_address(m.mint) for m in need])):
+                    if v and v.get("owner") == PUMP_AMM:
+                        b = base64.b64decode(v["data"][0])
+                        m.pool_tas = (b58encode(b[139:171]), b58encode(b[171:203]))   # its base and quote token accounts
+            grads = [m for m in grads if m.pool_tas]
+            if grads:
+                vals = await accounts([a for m in grads for a in m.pool_tas], "jsonParsed")
+                for k, m in enumerate(grads):
+                    base, quote = vals[2 * k], vals[2 * k + 1]
+                    try:
+                        m.on_pool(float(base["data"]["parsed"]["info"]["tokenAmount"]["uiAmount"]), float(quote["data"]["parsed"]["info"]["tokenAmount"]["uiAmount"]))
+                    except (TypeError, KeyError, ValueError):
+                        pass
+        except Exception as e:  # noqa: BLE001
+            print("[lp] chain read:", repr(e), flush=True)
+
+
+async def curve(mint: str) -> dict | None:
+    """A coin's bonding curve on chain: reserves, whether it has graduated, and its creator (None if there's none)."""
+    return parse_curve((await accounts([curve_address(mint)]))[0])
+
+
+def curve_address(mint: str) -> str:
+    return find_program_address([b"bonding-curve", b58decode(mint)], PUMP_PROGRAM)
 
 
 class PumpFunMarket(Market):
@@ -70,6 +128,7 @@ class PumpFunMarket(Market):
         self.mint, self.fee_to_compute = mint, fee_to_compute
         self.vsol, self.vtok, self.mcap = 0.0, 0.0, 0.0
         self.complete = False
+        self.pool_tas = None   # (base, quote) token accounts of its PumpSwap pool, once it has graduated
 
     def price(self) -> float:
         return self.vsol / self.vtok if self.vtok else (self.history[-1][1] if self.history else 0.0)
@@ -89,6 +148,28 @@ class PumpFunMarket(Market):
             s["mcap_sol"] = self.mcap
         s["mint"] = self.mint
         return s
+
+    def on_curve(self, c: dict):
+        """Its bonding curve as read from the chain (exact, once a minute)."""
+        if not self.complete:
+            self.vsol, self.vtok = c["vsol"] or self.vsol, c["vtok"] or self.vtok
+        self.complete = self.complete or c["complete"]
+
+    def on_pool(self, base: float, quote: float):
+        """A graduated coin's PumpSwap reserves (tokens, SOL): its price; a change since the last read counts as a trade."""
+        if base <= 0 or quote <= 0:
+            return
+        now, prev = time.time(), self.vsol
+        self.vsol, self.vtok = quote, base
+        self.mcap = self.price() * self.supply()
+        if prev and abs(quote - prev) > 1e-6:
+            sol = abs(quote - prev)
+            if self.fee_to_compute:
+                self.fees_sol += sol * AMM_CREATOR_FEE_BPS / 1e4
+            self.history.append((now, self.price()))
+            self.note_trade({"t": now, "side": "buy" if quote > prev else "sell", "sol": round(sol, 4), "price": self.price(), "who": ""})
+        elif not self.history or now - self.history[-1][0] > 5:
+            self.history.append((now, self.price()))
 
     def on_trade(self, m: dict):
         """A PumpPortal trade message."""
