@@ -77,6 +77,7 @@ TURN = "\n<|im_start|>user\n{nudge}<|im_end|>\n<|im_start|>assistant\n<think>\n\
 # Visitor questions: one global first-in-first-out line, answered one per turn when the current thought ends.
 REP_PENALTY = float(os.environ.get("BTM_REP_PENALTY", "0.6"))         # 0 = off (1.2 with a long memory shortened replies)
 NO_REPEAT_NGRAM = int(os.environ.get("BTM_NO_REPEAT_NGRAM", "6"))    # 0 = off
+SAID_TURNS = int(os.environ.get("BTM_SAID_TURNS", "4"))   # the n-gram ban also covers this many earlier replies (no sentence repeated across turns)
 MIN_WORDS = 8   # a reply shorter than this isn't remembered: the model copies its own recent replies, and a few short
                 # ones collapsed the long memory into empty turns (2026-10-02: 1,185 empty turns after turn 6)
 QUESTION_MAX = int(os.environ.get("BTM_QUESTION_MAX", "10"))     # questions waiting at most
@@ -206,6 +207,7 @@ class Crowd:
         self.questions: list[dict] = []         # the global line of visitor questions, oldest first
         self.asking: dict | None = None         # the question being answered right now
         self.short = 0                          # replies in a row too short to remember (see MIN_WORDS)
+        self.said: list[list[int]] = []         # token ids of the last SAID_TURNS replies (see SAID_TURNS)
         self.last_seen = time.time()
         self.has_clients = asyncio.Event()
         self.recent_turns: dict[str, list] = {}   # finished turns' full tokens, for the word inspector
@@ -404,6 +406,7 @@ async def speak_turn():
         loop.call_soon_threadsafe(q.put_nowait, ev)
 
     engine.cfg.min_step = 1.0 / pace()
+    engine.cfg.history_ids = [t for ids in crowd.said for t in ids + [-1]][:-1]
     t_start, first = time.time(), [None]
     worker = asyncio.ensure_future(loop.run_in_executor(None, lambda: engine.run(msgs, crowd.steer, emit, cancel, seed=secrets.randbelow(2**31),
                                                                                   prompt_ids=prompt_ids, reuse=snap)))
@@ -450,6 +453,8 @@ async def speak_turn():
     # Remember the exact steered text sent to visitors, not the unsteered control.
     # The next turn appends to this exact displayed history (T["snap"]), or window() re-reads it within HISTORY_TOKENS.
     reply = streams["steered"]["text"]
+    if reply.strip():
+        crowd.said = (crowd.said + [engine.chat.tokenizer.encode(reply, add_special_tokens=False)])[-SAID_TURNS:]
     if len(reply.split()) >= MIN_WORDS:
         crowd.short = 0
         T["turns"].append((msgs[-1]["content"], reply))

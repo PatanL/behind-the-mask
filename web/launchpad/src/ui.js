@@ -14,8 +14,11 @@ export function header(on) {
     h('a', { class: 'brand', href: base }, h('span', { class: 'eye' }), 'Steer AI'),
     h('nav', { class: 'nav' }, ...[['Live', base], ['Explore', `${base}explore.html`], ['Launch', `${base}launch.html`], ['Docs', `${base}docs.html`]].map(([t, u]) => h('a', { href: u, class: on === t ? 'on' : '' }, t))),
     h('div', { class: 'sp' }),
+    h('a', { class: 'top-link', href: `${base}docs.html` }, 'How it works'),
+    h('a', { class: 'top-link x-link', href: 'https://x.com/steerailive', target: '_blank', rel: 'noopener', 'aria-label': 'Steer AI on X', title: 'Steer AI on X (@steerailive)' }),
     h('button', { class: 'btn wallet-b', id: 'wallet-top', type: 'button' }, 'Connect wallet'),
     h('a', { class: 'btn primary', href: `${base}launch.html` }, 'Launch a coin'));
+  el.querySelector('.x-link').innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg>`;
   document.body.prepend(el);
   const b = el.querySelector('#wallet-top');
   onWallet((a) => { b.textContent = a ? `${a.slice(0, 4)}…${a.slice(-4)}` : 'Connect wallet'; b.classList.toggle('on', !!a); b.title = a ? 'Connected. Click to disconnect.' : 'Connect a Solana wallet (Phantom)'; });

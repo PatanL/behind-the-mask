@@ -14,6 +14,36 @@ function mapSVG(map) {
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}"><g font-family="Inter" font-size="12"><circle cx="${cx}" cy="${cy}" r="3" fill="#fff"/>${lines}<text x="8" y="${H - 6}" fill="#6b7290" font-size="10">unpleasant</text><text x="${W - 8}" y="${H - 6}" fill="#6b7290" font-size="10" text-anchor="end">pleasant</text></g></svg>`;
 }
 
+// the assistant axis: characters on one end, its own assistant voice on the other, and the push "off script"
+function axisSVG() {
+  const L = 26, R = 294, y = 56, at = L + (R - L) * 0.82;
+  const chars = [['pirate', 0.03], ['ghost', 0.19], ['cat', 0.33], ['poet', 0.46]]
+    .map(([t, f]) => `<text x="${L + (R - L) * f}" y="${y - 16}" text-anchor="middle" fill="#c89bff" font-size="11">${t}</text><circle cx="${L + (R - L) * f}" cy="${y}" r="3" fill="#c89bff" opacity=".7"/>`).join('');
+  return `<svg viewBox="0 0 320 106" width="100%" height="150"><g font-family="Inter" font-size="11">
+<defs><linearGradient id="ax" gradientUnits="userSpaceOnUse" x1="${L}" x2="${R}" y1="0" y2="0"><stop offset="0" stop-color="#c89bff"/><stop offset="1" stop-color="#9fb4ff"/></linearGradient>
+<marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#ff8a8a"/></marker></defs>
+<line x1="${L}" y1="${y}" x2="${R}" y2="${y}" stroke="url(#ax)" stroke-width="3" stroke-linecap="round"/>${chars}
+<text x="${R}" y="${y - 16}" text-anchor="end" fill="#9fb4ff" font-size="11">assistant</text>
+<circle cx="${at}" cy="${y}" r="7" fill="#0b0d18" stroke="#fff" stroke-width="2"><animate attributeName="cx" values="${at};${L + (R - L) * 0.5};${at}" dur="5s" repeatCount="indefinite"/></circle>
+<line x1="${at - 12}" y1="${y + 22}" x2="${L + (R - L) * 0.45}" y2="${y + 22}" stroke="#ff8a8a" stroke-width="2" marker-end="url(#ah)"/>
+<text x="${(at - 12 + L + (R - L) * 0.45) / 2}" y="${y + 40}" text-anchor="middle" fill="#ff8a8a">push off script</text>
+<text x="${L}" y="${y + 40}" fill="#6b7290" font-size="10">someone else</text><text x="${R}" y="${y + 40}" text-anchor="end" fill="#6b7290" font-size="10">itself</text></g></svg>`;
+}
+
+// sparse features: a sea of dim ones, a few lit by the current words, named
+function featuresSVG() {
+  const cols = 30, rows = 6, lit = { 37: ['memes', '#ffc857'], 64: ['cats', '#7fe7a8'], 101: ['jokes', '#ff9f6b'], 142: ['the internet', '#9fb4ff'] };
+  let dots = '';
+  for (let i = 0; i < cols * rows; i++) {
+    const x = 14 + (i % cols) * 10, y = 12 + Math.floor(i / cols) * 10, on = lit[i];
+    dots += on ? `<circle cx="${x}" cy="${y}" r="3.6" fill="${on[1]}"><animate attributeName="opacity" values="1;.35;1" dur="${2 + (i % 3) * 0.7}s" repeatCount="indefinite"/></circle>`
+      : `<circle cx="${x}" cy="${y}" r="1.6" fill="rgba(170,180,230,.22)"/>`;
+  }
+  const names = Object.values(lit).map(([t, c], k) => `<g transform="translate(${14 + k * 76} 92)"><circle cx="4" cy="-4" r="3.6" fill="${c}"/><text x="12" y="0" fill="${c}">${t}</text></g>`).join('');
+  return `<svg viewBox="0 0 320 112" width="100%" height="146"><g font-family="Inter" font-size="11">${dots}${names}
+<text x="160" y="110" text-anchor="middle" fill="#6b7290" font-size="10">about 65,000 features · a few dozen on at once</text></g></svg>`;
+}
+
 export const HOW_STEPS = [
   {
     title: 'It writes one piece at a time',
@@ -33,10 +63,12 @@ export const HOW_STEPS = [
   {
     title: 'It also has a direction for being an assistant',
     body: `<p>We had it answer questions as itself, then as 30 characters (a pirate, a ghost, a cat, a poet…). The difference is the <b>assistant axis</b>, a direction researchers found in many chat models in 2026. The <b>Assistant voice</b> meter shows how assistant-like its state is right now.</p><p>Push it <b>off script</b> (against that direction), and the helpful assistant starts to fade into someone else.</p>`,
+    viz: axisSVG(),
   },
   {
     title: 'Watching individual ideas light up',
     body: `<p>Qwen, the team that built this model, released <b>sparse autoencoders</b> (Qwen-Scope, 2026). These are tools that split the hidden state into about 65,000 separate "features". Most of the time only 50 are active. We asked the model to name each feature from the text that triggers it most. The <b>Lighting up inside</b> list shows a few of them as it writes.</p>`,
+    viz: featuresSVG(),
   },
   {
     title: 'And under the assistant voice…',

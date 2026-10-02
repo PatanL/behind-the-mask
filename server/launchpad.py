@@ -611,9 +611,14 @@ def api_coins(sort: str = "new"):
     return {"coins": cs, "stats": stats()}
 
 
+def find(cid: str):
+    """A coin by its id, or by its mint (a launched coin's pump.fun website links to coin.html?mint=...)."""
+    return COINS.get(cid) or next((x for x in COINS.values() if x.d.get("mint") and x.d["mint"] == cid), None)
+
+
 @app.get("/api/coins/{cid}")
 def api_coin(cid: str):
-    c = COINS.get(cid) or next((x for x in COINS.values() if x.d.get("mint") and x.d["mint"] == cid), None)   # by id, or by mint
+    c = find(cid)
     if not c:
         raise HTTPException(404, "No such coin.")
     s = coin_state(c)
@@ -810,7 +815,7 @@ async def ws_explore(ws: WebSocket):
 
 @app.websocket("/api/ws/coin/{cid}")
 async def ws_coin(ws: WebSocket, cid: str):
-    c = COINS.get(cid)
+    c = find(cid)
     await ws.accept()
     if not c:
         await send(ws, {"type": "error", "why": "No such coin."})

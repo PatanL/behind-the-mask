@@ -194,6 +194,7 @@ addEventListener('resize', chart);
 if (!id) location.replace('./');   // no coin named: the home page's android
 (id ? Promise.resolve(id) : new Promise(() => {}))
   .then(() => get(`api/coins/${encodeURIComponent(id)}`)).then((d) => {
+  id = d.id || id;   // opened by its mint (the pump.fun website): the live socket and trades use its id
   apply(d); series = d.series || []; chart();
   connect();
 }).catch(() => { $('#name').textContent = 'No such coin'; });

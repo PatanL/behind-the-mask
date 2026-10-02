@@ -154,6 +154,11 @@ class PumpFeed:
 FEED = PumpFeed()
 
 
+def live_url(mint: str) -> str:
+    """A launched coin's website on pump.fun: its android's live stream (always; the creator can't point it elsewhere)."""
+    return f"{SITE}/coin.html?mint={mint}"
+
+
 async def prepare(f: dict) -> dict:
     """Upload the coin's image + metadata to pump.fun, and get PumpPortal's unsigned create transaction."""
     if not PUMP_LAUNCH:
@@ -164,7 +169,7 @@ async def prepare(f: dict) -> dict:
     png = base64.b64decode(img.split(",", 1)[1])
     async with httpx.AsyncClient(timeout=30) as cl:
         r = await cl.post(PUMP_IPFS, data={"name": f["name"], "symbol": f["ticker"], "description": f.get("description", ""),
-                                           "website": f.get("website") or f"{SITE}/coin.html?mint={f['mint']}", "showName": "true"},
+                                           "website": live_url(f["mint"]), "showName": "true"},
                           files={"file": ("android.png", png, "image/png")})
         r.raise_for_status()
         uri = r.json()["metadataUri"]

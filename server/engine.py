@@ -17,7 +17,7 @@ import math
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 
@@ -39,6 +39,9 @@ class GenConfig:
     rep_penalty: float = 0.0
     rep_window: int = 96
     no_repeat_ngram: int = 0
+    # tokens of the speaker's recent earlier replies: the n-gram ban covers them too, so a turn can't repeat a
+    # sentence from the last few turns word for word (live)
+    history_ids: list = field(default_factory=list)
     # the counterfactual row starts exactly like the unpushed row, so read the prompt only for rows 0-1 and copy
     # row 0's cache into row 2 (a third less prefill work: a shorter pause before each new turn)
     share_prefill: bool = False
@@ -109,11 +112,13 @@ def _discourage_repeats(logits: torch.Tensor, row: int, ids: list[int], cfg: "Ge
         recent = torch.tensor(sorted(set(ids[-cfg.rep_window:])), device=logits.device)
         logits[row, recent] -= cfg.rep_penalty
     n = cfg.no_repeat_ngram
-    if n > 1 and len(ids) >= n:
+    if n > 1 and len(ids) >= n - 1:
+        seen = list(cfg.history_ids) + [-1] + ids if cfg.history_ids else ids   # -1: no phrase spans two replies
         prefix, banned = tuple(ids[-(n - 1):]), set()
-        for i in range(len(ids) - n + 1):
-            if tuple(ids[i:i + n - 1]) == prefix:
-                banned.add(ids[i + n - 1])
+        for i in range(len(seen) - n + 1):
+            if tuple(seen[i:i + n - 1]) == prefix:
+                banned.add(seen[i + n - 1])
+        banned.discard(-1)
         if banned:
             logits[row, torch.tensor(sorted(banned), device=logits.device)] = -float("inf")
 
