@@ -324,10 +324,10 @@ def job(fn):
 
 def prompt_ids(c: Coin, nudge: str, history: list | None = None) -> list[int]:
     chat = ENGINE["chat"]
-    system = (f"You are {c.d['name']}. {c.d['persona']}\n"
-              f"You are performing live as an android, on a stream: people are watching your face while you talk. "
-              f"Speak in the first person, as {c.d['name']}, in a natural spoken voice, one complete thought at a time, and "
-              f"finish the thought before you stop. Stay in character. No lists, no headings, no emoji.")
+    # the launcher's character is the prompt; the platform adds only what speaking out loud needs
+    system = (f"You are {c.d['name']}. {c.d['persona']}\n\n"
+              f"You're speaking out loud, live: plain spoken sentences, one complete thought at a time, and finish it "
+              f"before you stop. No lists, headings or emoji.")
     msgs = [{"role": "system", "content": system}]
     for asked, reply in (history or []):
         msgs += [{"role": "user", "content": asked}, {"role": "assistant", "content": reply}]
@@ -846,7 +846,7 @@ async def api_create(req: Request):
     now, src = time.time(), launch_source(f, req)
     name = clean(f.get("name"), 32, "name")
     ticker = re.sub(r"[^A-Za-z0-9]", "", str(f.get("ticker") or ""))[:10].upper()
-    persona = clean(f.get("persona"), 600, "character")
+    persona = clean(f.get("persona"), 2000, "character")
     if len(name) < 2 or len(ticker) < 2 or len(persona) < 12:
         raise HTTPException(400, "A name, a ticker and a character (a sentence or two) are needed.")
     if any(c.d["ticker"] == ticker and c.market.kind != "sim" for c in COINS.values()):
@@ -964,7 +964,7 @@ PREPARED: set = set()    # mints whose launch passed the gate
 async def api_pump_prepare(req: Request):
     f = await req.json()
     f["name"], f["ticker"] = clean(f.get("name"), 32, "name"), re.sub(r"[^A-Za-z0-9]", "", str(f.get("ticker") or ""))[:10].upper()
-    persona = clean(f.get("persona"), 600, "character")
+    persona = clean(f.get("persona"), 2000, "character")
     if len(f["name"]) < 2 or len(f["ticker"]) < 2 or len(persona) < 12:
         raise HTTPException(400, "A name, a ticker and a character (a sentence or two) are needed.")
     if any(c.d["ticker"] == f["ticker"] and c.market.kind != "sim" for c in COINS.values()):

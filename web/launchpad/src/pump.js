@@ -19,7 +19,7 @@ export async function launchOnPump(coin, note = () => {}) {
   note('Uploading its portrait to pump.fun…');
   const r = await post('api/pump/prepare', {
     creator: address, mint: mint.publicKey.toBase58(), name: coin.name, ticker: coin.ticker,
-    description: `${coin.persona}\n\nA live android on Steer AI.`, image: coin.image, dev_buy_sol: coin.devBuy || 0,
+    description: `${coin.persona.length > 900 ? `${coin.persona.slice(0, 900)}…` : coin.persona}\n\nA live android on Steer AI.`, image: coin.image, dev_buy_sol: coin.devBuy || 0,
     persona: coin.persona, concept: coin.concept || null,
   });
   const connection = new Connection(new URL(api('api/rpc'), location.href).href, 'confirmed');
