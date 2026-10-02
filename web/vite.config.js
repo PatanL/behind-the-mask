@@ -7,7 +7,7 @@ import { siteMeta } from './site-meta.js';
 // build live at a sub-path (GitHub Pages without a custom domain: /behind-the-mask/).
 // /api is the launchpad server (server/launchpad.py); /live is the exhibit's crowd-steering server (server/live.py).
 const R = (p) => resolve(import.meta.dirname, p);
-const pages = ['index', 'explore', 'coin', 'launch', 'docs'];
+const pages = ['index', 'explore', 'coin', 'launch', 'docs', 'setup'];
 const proxy = { '/api': { target: 'http://127.0.0.1:8770', ws: true }, '/live': { target: 'http://127.0.0.1:8765', ws: true } };
 const exhibit = { name: 'exhibit', apply: 'build', async closeBundle() { if (!process.env.LP_NO_EXHIBIT) await build({ configFile: R('vite.exhibit.config.js'), root: R('.') }); } };
 export default defineConfig({

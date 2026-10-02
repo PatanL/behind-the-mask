@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Setup · Steer AI</title>
+  <meta name="description" content="One-time setup for Steer AI's pump.fun launches." />
+  <meta name="robots" content="noindex" />
+</head>
+<body>
+  <main class="setup">
+    <section class="ex-head">
+      <div class="lbl">// one-time setup</div>
+      <h1>Launch lookup table</h1>
+      <p>Creates an address lookup table on Solana holding the accounts every launch shares, so a launch with a first buy fits in one transaction. Your wallet pays the table's rent (about 0.005 SOL) and owns it. Do this once.</p>
+      <p><button class="btn primary" id="go" type="button">Create the lookup table</button></p>
+      <pre class="setup-log" id="log"></pre>
+    </section>
+  </main>
+  <script type="module" src="./src/setup.js"></script>
+</body>
+</html>

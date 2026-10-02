@@ -95,6 +95,33 @@ def b58decode(s: str) -> bytes:
     return b"\x00" * (len(s) - len(s.lstrip("1"))) + raw
 
 
+def b58encode(b: bytes) -> str:
+    n, out = int.from_bytes(b, "big"), ""
+    while n:
+        n, r = divmod(n, 58)
+        out = _B58[r] + out
+    return "1" * (len(b) - len(b.lstrip(b"\0"))) + out
+
+
+def on_curve(b: bytes) -> bool:
+    try:
+        _decode(b)
+        return True
+    except ValueError:
+        return False
+
+
+def find_program_address(seeds: list[bytes], program: str) -> str:
+    """Solana's PDA: the first bump (255 down) whose hash is off the ed25519 curve."""
+    import hashlib
+    pid = b58decode(program)
+    for bump in range(255, -1, -1):
+        h = hashlib.sha256(b"".join(seeds) + bytes([bump]) + pid + b"ProgramDerivedAddress").digest()
+        if not on_curve(h):
+            return b58encode(h)
+    raise ValueError("no program address")
+
+
 def message(address: str, nonce: str) -> str:
     return f"Steer AI Launchpad: steer as {address}\nnonce {nonce}"
 

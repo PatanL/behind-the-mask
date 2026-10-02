@@ -99,8 +99,8 @@ form.onsubmit = async (e) => {
     };
     body.devBuy = Number(form.dev_buy.value || 0);
     if (market === 'pump') {
-      $('#go').textContent = 'Sign in your wallet…';
-      body.mint = await launchOnPump(body);    // the coin is created on pump.fun first; then its android
+      $('#go').textContent = 'Launching…';
+      body.mint = await launchOnPump(body, (t) => { $('#err').textContent = t; });   // the coin is created on pump.fun first; then its android
       body.market = 'pair';
     }
     const r = await post('api/coins', body);

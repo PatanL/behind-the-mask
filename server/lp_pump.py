@@ -1,13 +1,14 @@
 """pump.fun coins: their market (live trades from PumpPortal's public data stream) and launching from the page.
 
 PumpFunMarket follows one coin: every buy and sell (PumpPortal `subscribeTokenTrade`), its price from the bonding
-curve's virtual reserves, its market cap and volume. Its fee share for compute: when the platform is the coin's
-creator (fee_to_compute), creator fees of LP_CREATOR_FEE_BPS of volume accrue to the android's compute; a coin paired
-by its own creator is funded by its free time and top-ups instead.
+curve's virtual reserves, its market cap and volume. Its starting state is read from its bonding curve on chain.
 
-Launching (POST /api/pump/prepare, /api/pump/confirm) is off unless LP_PUMP_LAUNCH=1: the server relays the image +
-metadata upload to pump.fun and asks PumpPortal for the unsigned create transaction; the creator's wallet and the
-mint key made in their browser sign it. No key is held here.
+Launching (POST /api/pump/prepare, /api/pump/confirm) is off unless LP_PUMP_LAUNCH=1. The server uploads the image and
+metadata to pump.fun; the launch page builds the create transaction with pump.fun's own SDK
+(web/launchpad/src/pumpcreate.js), the launcher's wallet signing and paying, with the coin's creator set to the
+platform treasury (so creator fees go there). No key is held here. Settings: runs/launchpad/pump.json
+{"treasury": <pubkey>, "alt": <address lookup table>} (or LP_TREASURY / LP_ALT). With a treasury set, a coin only gets
+an android if its on-chain creator is the treasury.
 """
 from __future__ import annotations
 
@@ -18,17 +19,46 @@ import os
 import time
 
 import httpx
+from pathlib import Path
+
+from lp_wallet import b58decode, b58encode, find_program_address
 
 from lp_market import Market
 
 PUMP_LAUNCH = os.environ.get("LP_PUMP_LAUNCH", "0") == "1"
 CREATOR_FEE_BPS = float(os.environ.get("LP_CREATOR_FEE_BPS", "30"))     # pump.fun's creator fee on volume (set to the current rate)
 PP_WS = os.environ.get("LP_PUMPPORTAL_WS", "wss://pumpportal.fun/api/data")
-PP_LOCAL = os.environ.get("LP_PUMPPORTAL_LOCAL", "https://pumpportal.fun/api/trade-local")
 PUMP_IPFS = os.environ.get("LP_PUMP_IPFS", "https://pump.fun/api/ipfs")
 PUMP_COIN = os.environ.get("LP_PUMP_COIN_API", "https://frontend-api-v3.pump.fun/coins/{mint}")
 RPC = os.environ.get("LP_RPC", "https://api.mainnet-beta.solana.com")
 SITE = os.environ.get("LP_SITE", "https://steerai.live")       # a launched coin's website: its android's page
+PUMP_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+SETTINGS = Path(os.environ.get("LP_STATE", "runs/launchpad")) / "pump.json"
+
+
+def settings() -> dict:
+    """The treasury (every coin's creator: its fees) and the address lookup table launches use. Env overrides the file."""
+    try:
+        d = json.loads(SETTINGS.read_text())
+    except (OSError, ValueError):
+        d = {}
+    return {"treasury": os.environ.get("LP_TREASURY") or d.get("treasury") or "", "alt": os.environ.get("LP_ALT") or d.get("alt") or ""}
+
+
+def curve_address(mint: str) -> str:
+    return find_program_address([b"bonding-curve", b58decode(mint)], PUMP_PROGRAM)
+
+
+async def curve(mint: str) -> dict | None:
+    """A coin's bonding curve on chain: reserves, whether it has graduated, and its creator (None if there's none)."""
+    async with httpx.AsyncClient(timeout=15) as cl:
+        r = await cl.post(RPC, json={"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo", "params": [curve_address(mint), {"encoding": "base64", "commitment": "confirmed"}]})
+    v = (r.json().get("result") or {}).get("value")
+    if not v or v.get("owner") != PUMP_PROGRAM:
+        return None
+    b = base64.b64decode(v["data"][0])
+    u = lambda o: int.from_bytes(b[o:o + 8], "little")
+    return {"vtok": u(8) / 1e6, "vsol": u(16) / 1e9, "complete": bool(b[48]), "creator": b58encode(b[49:81])}
 
 
 class PumpFunMarket(Market):
@@ -81,18 +111,14 @@ class PumpFunMarket(Market):
         return out
 
     async def seed(self):
-        """The coin's state before any trade arrives (pump.fun's public coin API; best effort)."""
+        """The coin's state before any trade arrives: its bonding curve, read on chain (best effort)."""
         try:
-            async with httpx.AsyncClient(timeout=10) as cl:
-                r = await cl.get(PUMP_COIN.format(mint=self.mint))
-            if r.status_code == 200:
-                d = r.json()
-                self.vsol = float(d.get("virtual_sol_reserves") or 0) / 1e9
-                self.vtok = float(d.get("virtual_token_reserves") or 0) / 1e6
-                self.mcap = float(d.get("market_cap") or 0)
-                self.complete = bool(d.get("complete"))
+            c = await curve(self.mint)
+            if c:
+                self.vsol, self.vtok, self.complete = c["vsol"], c["vtok"], c["complete"]
+                self.mcap = self.price() * self.supply()
                 self.history.append((time.time(), self.price()))
-                return {"name": d.get("name"), "symbol": d.get("symbol"), "complete": self.complete}
+                return c
         except Exception as e:  # noqa: BLE001
             print("[lp] pump seed failed:", self.mint, repr(e), flush=True)
         return None
@@ -160,7 +186,7 @@ def live_url(mint: str) -> str:
 
 
 async def prepare(f: dict) -> dict:
-    """Upload the coin's image + metadata to pump.fun, and get PumpPortal's unsigned create transaction."""
+    """Upload the coin's image + metadata to pump.fun -> its metadata uri, and who its creator will be."""
     if not PUMP_LAUNCH:
         raise RuntimeError("Launching on pump.fun is switched off on this server.")
     img = str(f.get("image") or "")
@@ -172,13 +198,8 @@ async def prepare(f: dict) -> dict:
                                            "website": live_url(f["mint"]), "showName": "true"},
                           files={"file": ("android.png", png, "image/png")})
         r.raise_for_status()
-        uri = r.json()["metadataUri"]
-        r = await cl.post(PP_LOCAL, json={"publicKey": f["creator"], "action": "create",
-                                          "tokenMetadata": {"name": f["name"], "symbol": f["ticker"], "uri": uri},
-                                          "mint": f["mint"], "denominatedInSol": "true", "amount": float(f.get("dev_buy_sol") or 0),
-                                          "slippage": 10, "priorityFee": 0.0005, "pool": "pump"})
-        r.raise_for_status()
-    return {"tx": base64.b64encode(r.content).decode(), "uri": uri}
+    st = settings()
+    return {"uri": r.json()["metadataUri"], "creator": st["treasury"] or f["creator"], "alt": st["alt"] or None}
 
 
 async def confirmed(signature: str, tries: int = 20) -> bool:
@@ -190,3 +211,16 @@ async def confirmed(signature: str, tries: int = 20) -> bool:
                 return True
             await asyncio.sleep(2)
     return False
+
+
+async def fees_ours(mint: str) -> tuple[bool, str]:
+    """Whether a coin's creator fees come to the treasury (its on-chain creator); with no treasury set, any coin counts."""
+    t = settings()["treasury"]
+    if not t:
+        return True, ""
+    c = await curve(mint)
+    if not c:
+        return False, "That isn't a pump.fun coin (no bonding curve on chain)."
+    if c["creator"] != t:
+        return False, "Only coins launched here get an android: this coin's creator fees go elsewhere."
+    return True, ""

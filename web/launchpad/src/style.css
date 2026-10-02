@@ -179,3 +179,6 @@ footer a:hover { color: var(--cyan); }
 
 .live-strip { display: inline-flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 14px; border: 1px solid var(--line2); background: rgba(127, 231, 255, 0.04); font-size: 14px; color: var(--ink2); }
 .live-strip:hover { border-color: var(--cyan-d); box-shadow: var(--glow); color: var(--ink); } .live-strip b { color: var(--ink); }
+
+/* setup (one-time admin page) */
+.setup-log { margin-top: 18px; padding: 14px 16px; min-height: 60px; white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; color: var(--ink2); border: 1px solid var(--line); background: var(--card); }

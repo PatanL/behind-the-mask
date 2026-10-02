@@ -27,6 +27,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -691,12 +692,16 @@ async def api_create(req: Request):
             raise HTTPException(400, "That isn't a Solana mint address.")
         if any(c.d.get("mint") == mint for c in COINS.values()):
             raise HTTPException(400, "That coin already has an android.")
+        ours, why = await lp_pump.fees_ours(mint)   # (with a treasury set: only coins whose creator fees come here)
+        if not ours:
+            raise HTTPException(400, why)
     if not (market == "pump" and mint in PREPARED):    # (a pump.fun launch was checked before its transaction)
         await gate(f, req, name, persona, (concept or {}).get("name", ""))
     LAUNCH_LOG.append((now, src))
     d = new_coin_doc({"name": name, "ticker": ticker, "persona": persona, "concept": concept, "temperament": temp,
                       "temperament_name": f.get("temperament_name"), "look": look, "steer_mode": mode, "model": model,
-                      "creator": str(f.get("creator") or "")[:64] or None, "mint": mint, "market": market})
+                      "creator": str(f.get("creator") or "")[:64] or None, "mint": mint, "market": market,
+                      "fee_to_compute": market == "pump" and bool(lp_pump.settings()["treasury"])})
     c = Coin(d)
     COINS[c.id] = c
     img = str(f.get("image") or "")
@@ -751,7 +756,24 @@ async def api_trade(cid: str, req: Request):
 
 @app.get("/api/pump/status")
 def api_pump_status():
-    return {"launch": lp_pump.PUMP_LAUNCH, "feed": FEED.connected, "paired": len(FEED.markets)}
+    st = lp_pump.settings()
+    return {"launch": lp_pump.PUMP_LAUNCH, "feed": FEED.connected, "paired": len(FEED.markets), "treasury": st["treasury"] or None, "alt": st["alt"] or None}
+
+
+RPC_METHODS = {"getLatestBlockhash", "getAccountInfo", "getMultipleAccounts", "getSignatureStatuses", "getMinimumBalanceForRentExemption",
+               "getSlot", "getBalance", "getFeeForMessage", "getRecentPrioritizationFees", "getTokenAccountBalance", "simulateTransaction"}
+
+
+@app.post("/api/rpc")
+async def api_rpc(req: Request):
+    """The launch page's Solana reads, through this server (one place for the RPC provider; reads only, no sending)."""
+    body = await req.json()
+    calls = body if isinstance(body, list) else [body]
+    if len(calls) > 20 or any(not isinstance(c, dict) or c.get("method") not in RPC_METHODS for c in calls):
+        raise HTTPException(400, "Not an allowed RPC call.")
+    async with httpx.AsyncClient(timeout=20) as cl:
+        r = await cl.post(lp_pump.RPC, json=body)
+    return JSONResponse(r.json(), status_code=r.status_code)
 
 
 PREPARED: set = set()    # mints whose launch passed the gate
@@ -783,6 +805,10 @@ async def api_pump_confirm(req: Request):
     ok = await lp_pump.confirmed(str(f.get("signature") or ""))
     if not ok:
         raise HTTPException(400, "The launch didn't confirm on chain.")
+    mint = str(f.get("mint") or "")
+    ours, why = await lp_pump.fees_ours(mint) if mint else (False, "No mint.")
+    if not ours:
+        raise HTTPException(400, why)
     return {"ok": True}
 
 
