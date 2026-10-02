@@ -16,6 +16,8 @@ document.addEventListener('click', (e) => {
   const a = e.target.closest?.('a.card'); if (!a) return;
   const c = cards.get(a.dataset.id); if (!c?.coin?.look) return;
   try { sessionStorage.setItem(`lp-look-${c.coin.id}`, JSON.stringify(c.coin.look)); } catch { /* */ }
+  // and its face as it is right now, shown on the coin page until the live face is ready there
+  try { const f = a.querySelector('canvas.face-frame'); if (f && f.width > 0) sessionStorage.setItem(`lp-shot-${c.coin.id}`, f.toDataURL('image/jpeg', 0.85)); } catch { /* */ }
 }, true);
 
 // ---- $STEER at the top: the home page's android, live (a light feed of its words and readouts)
@@ -96,6 +98,13 @@ function card(c) {
   return { el, box, coin: c, slot: null, lift: ORDER.map(() => 0), lastLine: '', said: 0 };
 }
 
+// the end of what it's saying, starting at a word (not mid-word)
+function tail(line, n = 130) {
+  const t = (line || '…').trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(-n), sp = cut.indexOf(' ');
+  return `…${sp > 0 && sp < 25 ? cut.slice(sp + 1) : cut}`;
+}
 function update(c, d) {
   const prev = c.coin.status;
   c.coin = d;
@@ -103,7 +112,7 @@ function update(c, d) {
   st.textContent = STATUS[d.status] || d.status;
   st.className = `status ${d.status === 'asleep' ? '' : d.status === 'losing it' ? 'losing' : 'awake'}`;
   c.el.classList.toggle('asleep', d.status === 'asleep');
-  c.el.querySelector('.line').textContent = d.status === 'asleep' ? 'Asleep. A trade will wake it.' : (d.line || '…').trim().slice(-130);
+  c.el.querySelector('.line').textContent = d.status === 'asleep' ? 'Asleep. A trade will wake it.' : tail(d.line);
   const real = d.market !== 'sim' || DEMO;
   c.el.querySelector('.mcap').textContent = real ? inUsd(d.mcap_sol, solUsd) : 'not yet';
   const ch = c.el.querySelector('.chg'); ch.textContent = real ? pct(d.change_5m) : '—'; ch.className = `chg ${d.change_5m >= 0 ? 'up' : 'down'}`;

@@ -35,6 +35,17 @@ export function usd(x) {
   const a = Math.abs(x);
   return a >= 1e9 ? `$${(x / 1e9).toFixed(2)}B` : a >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : a >= 1e3 ? `$${(x / 1e3).toFixed(1)}K` : `$${x.toFixed(0)}`;
 }
+/** a token's price in dollars, pump.fun style for tiny ones: $0.0₅251 (five zeros after the point, then 251) */
+export function priceUsd(solPrice, solUsd) {
+  if (!solPrice) return '—';
+  if (!solUsd) return `${solPrice.toExponential(3)} SOL`;
+  const v = solPrice * solUsd;
+  if (v >= 1) return `$${v.toFixed(2)}`;
+  if (v >= 0.001) return `$${v.toPrecision(3)}`;
+  const zeros = Math.ceil(-Math.log10(v)) - 1, digits = String(Math.round(v * 10 ** (zeros + 4))).replace(/0+$/, '');
+  const sub = String(zeros).replace(/\d/g, (x) => '₀₁₂₃₄₅₆₇₈₉'[x]);
+  return `$0.0${sub}${digits}`;
+}
 export const inUsd = (solAmount, solUsd, d = 1) => (solUsd ? usd(solAmount * solUsd) : sol(solAmount, d));
 export const sol = (x, d = 3) => (x == null ? '—' : `${x < 0.001 && x > 0 ? x.toExponential(1) : x.toFixed(d)} SOL`);
 export const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(x !== 0 && Math.abs(x) < 0.1 ? 1 : 0)}%`);

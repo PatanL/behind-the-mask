@@ -362,9 +362,9 @@ async def give_slot(c: Coin):
     if memory().get("available", 99) < 6:   # never run the machine out of memory: speaking can wait
         return
     c.status, c.spoke_at = "waking", time.time()
-    opening = f"{people(len(c.clients))} Introduce yourself to them, then talk about whatever is on your mind."
+    opening = "Introduce yourself, then talk about whatever is on your mind."   # (no viewer count: the owner's call)
     nudge = opening if not c.history else FOLLOWS[0]
-    ids = prompt_ids(c, (f"{people(len(c.clients))} " if c.history else "") + nudge, c.history[-2:])
+    ids = prompt_ids(c, nudge, c.history[-2:])
     row = Row(key=c.id, max_new=MAX_NEW, soft=SOFT_NEW)
     row.steer = {} if c.d.get("mu") is None else c.mix()   # the very first reply is unpushed: its readout's baseline
     row.on_token = lambda r, tok, c=c: LOOP.call_soon_threadsafe(on_token, c, tok)
@@ -455,13 +455,12 @@ async def next_turn(c: Coin):
     row = mm.row(c.id)
     if row is None:
         return
-    n = len(c.clients)
     # what comes next: a visitor's question, or more of the same thought (it isn't told about its coin: the owner's call)
     if c.questions:
         c.asking = c.questions.pop(0)
-        nudge = f"{people(n)} One of them asks you: \"{c.asking['q']}\" Answer them in character, and finish your answer before you stop."
+        nudge = f"Someone watching asks you: \"{c.asking['q']}\" Answer them in character, and finish your answer before you stop."
     else:
-        nudge = f"{people(n)} {FOLLOWS[c.follow_i % len(FOLLOWS)]}"
+        nudge = FOLLOWS[c.follow_i % len(FOLLOWS)]
         c.follow_i += 1
     if c.short >= 2 or row.pos > CTX_LIMIT:
         # memory full: a fresh start with the last two exchanges as context; replies collapsing: a clean start

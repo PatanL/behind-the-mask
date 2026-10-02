@@ -1,6 +1,6 @@
 // One coin's android, live: its face and words, its chart, steering it, asking it things.
 import { get, post, wsUrl, visitorId, api } from './api.js';
-import { $, h, header, footer, sol, pct, left, feelBar, STATUS, inUsd } from './ui.js';
+import { $, h, header, footer, sol, pct, left, feelBar, STATUS, inUsd, priceUsd } from './ui.js';
 import { Performer } from './feel.js';
 import { Stage } from '../../src/stage.js';
 import { Speech } from '../../src/speech.js';
@@ -20,14 +20,22 @@ let perf = null, info = null, ws = null, series = [], queue = [], text = [];
 let early = null;
 try { early = JSON.parse(sessionStorage.getItem(`lp-look-${id}`) || 'null'); } catch { /* */ }
 const faceEl = $('#face'); faceEl.style.opacity = '0'; faceEl.style.transition = 'opacity 0.45s ease';
+// meanwhile the card's last frame (handed over from explore) holds its place, so the android is there at once
+const shotEl = $('#face-shot');
+try { const shot = sessionStorage.getItem(`lp-shot-${id}`); if (shot) { shotEl.src = shot; shotEl.hidden = false; } } catch { /* */ }
 let shown = false;
 async function reveal() {
   if (shown) return; shown = true;
-  try { await stage.renderer.compileAsync?.(stage.scene, stage.camera); } catch { /* */ }   // its new materials, before showing
-  requestAnimationFrame(() => requestAnimationFrame(() => { faceEl.style.opacity = '1'; }));
+  // its new materials compiled before showing (but a slow phone doesn't wait for it)
+  try { await Promise.race([stage.renderer.compileAsync?.(stage.scene, stage.camera), new Promise((r) => setTimeout(r, 600))]); } catch { /* */ }
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    faceEl.style.opacity = '1'; performance.mark('face-shown');
+    if (!shotEl.hidden) { shotEl.style.opacity = '0'; setTimeout(() => { shotEl.hidden = true; }, 600); }
+  }));
 }
-setTimeout(() => { shown || reveal(); }, 4000);   // (never leave it hidden)
+setTimeout(() => { shown || reveal(); }, 2500);   // (never leave it hidden)
 stage.ready.then(() => {
+  performance.mark('face-loaded');
   perf = new Performer(stage.face); if (info?.mu) perf.reset(info.mu);
   if (info) look(info); else if (early) { stage.face.setLook(early); reveal(); }
 });
@@ -150,7 +158,7 @@ function apply(d) {
   for (const el of document.querySelectorAll('.head .price, .head .chart, .head .kv')) el.hidden = !real;
   $('#nocoin').hidden = real;
   $('#nocoin').textContent = `$${d.ticker} hasn't launched yet.`;
-  $('#price').textContent = d.price ? `${d.price.toExponential(3)} SOL` : '—';
+  $('#price').textContent = priceUsd(d.price, d.sol_usd);
   const ch = $('#chg'); ch.textContent = `${pct(d.change_5m)} 5m`; ch.className = `mono ${d.change_5m >= 0 ? 'up' : 'down'}`;
   $('#mcap').textContent = inUsd(d.mcap_sol, d.sol_usd); $('#vol').textContent = inUsd(d.volume_sol, d.sol_usd);
   $('#curve').textContent = `${Math.round((d.curve || 0) * 100)}%`; $('#left').textContent = left(d.time_left);

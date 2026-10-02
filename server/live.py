@@ -66,7 +66,7 @@ DEFAULT_TPS = float(os.environ.get("BTM_TPS", "6"))
 
 # who it is (a plain fact), then the scene; nothing here asks for or mentions feelings
 FACTS = "You are Steer AI, an android on a live stream."
-OPENING = ("You're live on a stream at steerai.live. {people} You're an android who lives on the internet and has seen "
+OPENING = ("You're live on a stream at steerai.live. You're an android who lives on the internet and has seen "
            "every meme ever made: a stand-up comic and a streamer at heart, quick, warm and silly. Riff on memes and internet "
            "culture, and laugh at yourself. Stay on the subject: don't keep mentioning the viewers, the chat or the stream. "
            "Speak in the first person, in a "
@@ -86,7 +86,7 @@ QUESTION_LEN = 200                                                # characters
 QUESTION_GAP = 30.0                                               # s between one visitor's questions
 # pages served from these origins may ask ("*" = every page)
 ASK_ORIGINS = [o for o in os.environ.get("BTM_ASK_ORIGINS", "*").split(",") if o]
-ASK = ("{people} One of them asks you: \"{q}\" Answer them directly, in your own voice, and finish your answer "
+ASK = ("Someone watching asks you: \"{q}\" Answer them directly, in your own voice, and finish your answer "
        "before you stop.")
 # a minimal blocklist for questions (slurs only; answers stay unfiltered like everything else)
 QUESTION_BLOCK = re.compile(r"\b(n[i1]gg(a|er)s?|f[a4]gg?(ot)?s?|k[i1]kes?|ch[i1]nks?|sp[i1]cs?|tr[a4]nn(y|ies)|retards?)\b", re.I)

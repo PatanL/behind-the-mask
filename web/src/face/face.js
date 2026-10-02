@@ -19,6 +19,7 @@ import { NATURAL_FOLDS_GLSL, CORRECTIVE_GLSL } from './natural-folds.js';
 import { reliefSample } from '../acting/relief-take.js';
 import { SpeechMotion, composeSpeech } from './speech-motion.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
 export const EMOTIONS = ['joy', 'sadness', 'anger', 'fear', 'calm', 'curiosity', 'surprise', 'disgust'];
@@ -511,6 +512,14 @@ function scaleCh(into, name, k) {
 }
 
 // ------------------------------------------------------------------------------------------------
+// The model is parsed once per page and shared: a page of faces (the explore grid) would otherwise parse the same 2 MB
+// file once per face, each costing a phone's main thread a few hundred milliseconds.
+const MODELS = new Map();
+function loadModel(url) {
+  if (!MODELS.has(url)) MODELS.set(url, new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url).catch((e) => { MODELS.delete(url); throw e; }));
+  return MODELS.get(url);
+}
+
 export class AndroidFace {
   constructor(scene, url = '/face/android.glb', options = {}) {
     this.scene = scene;
@@ -613,9 +622,9 @@ export class AndroidFace {
 
   // -------------------------------------------------------------------------------- loading
   async _load(url) {
-    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(url);
+    const gltf = await loadModel(url);
     this.gltf = gltf;
-    const model = gltf.scene;
+    const model = SkeletonUtils.clone(gltf.scene);   // its own copy (bones and all); the geometry is shared, materials are its own
     this.root.add(model);
     this.model = model;
     this.morphMeshes = [];
@@ -2096,6 +2105,6 @@ export class AndroidFace {
 
   dispose() {
     this.scene.remove(this.root);
-    this.root.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+    this.root.traverse((o) => { if (o.isMesh) o.material.dispose(); });   // (the geometry is shared by every face on the page)
   }
 }
