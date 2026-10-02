@@ -223,7 +223,7 @@ class Coin:
 COINS: dict[str, Coin] = {}
 ENGINE = {"mm": None, "chat": None, "loading": True, "error": None, "jobs": []}
 LOOP: asyncio.AbstractEventLoop | None = None
-EXPLORE: dict = {}       # ws -> True
+EXPLORE: dict = {}       # ws -> whether it's a demo page (lists demo coins too)
 STOP = threading.Event()
 
 
@@ -546,10 +546,10 @@ async def explore_loop():
         await asyncio.sleep(1.0)
         if not EXPLORE:
             continue
-        data = json.dumps({"type": "coins", "coins": [c.summary() for c in COINS.values()], "stats": stats()})
-        for ws in list(EXPLORE):
+        data = {d: json.dumps({"type": "coins", "coins": [c.summary() for c in listed(d)], "stats": stats(d)}) for d in set(EXPLORE.values())}
+        for ws, d in list(EXPLORE.items()):
             try:
-                await ws.send_text(data)
+                await ws.send_text(data[d])
             except Exception:  # noqa: BLE001
                 EXPLORE.pop(ws, None)
 
@@ -562,8 +562,13 @@ async def state_loop():
                 await broadcast_coin(c, coin_state(c))
 
 
-def stats() -> dict:
-    cs = list(COINS.values())
+def listed(demo: bool = False) -> list:
+    """The coins a page lists: real ones; demo coins (simulated markets) only on demo pages."""
+    return [c for c in COINS.values() if demo or c.market.kind != "sim"]
+
+
+def stats(demo: bool = False) -> dict:
+    cs = listed(demo)
     return {"coins": len(cs), "awake": sum(c.status != "asleep" for c in cs), "compute_sol": round(sum(c.market.fees_sol for c in cs), 4),
             "volume_sol": round(sum(c.market.volume_sol for c in cs), 3), "loading": ENGINE["loading"]}
 
@@ -603,12 +608,12 @@ def api_status():
 
 
 @app.get("/api/coins")
-def api_coins(sort: str = "new"):
-    cs = [c.summary() for c in COINS.values()]
+def api_coins(sort: str = "new", demo: int = 0):
+    cs = [c.summary() for c in listed(bool(demo))]
     key = {"new": lambda s: -s["created"], "mcap": lambda s: -s["mcap_sol"], "emotional": lambda s: -s["intensity"],
            "volume": lambda s: -s["volume_sol"]}.get(sort, lambda s: -s["created"])
     cs.sort(key=lambda s: (not s["featured"], key(s)))
-    return {"coins": cs, "stats": stats()}
+    return {"coins": cs, "stats": stats(bool(demo))}
 
 
 def find(cid: str):
@@ -802,8 +807,9 @@ def api_logs(cid: str, turn: str | None = None):
 @app.websocket("/api/ws/explore")
 async def ws_explore(ws: WebSocket):
     await ws.accept()
-    EXPLORE[ws] = True
-    await send(ws, {"type": "coins", "coins": [c.summary() for c in COINS.values()], "stats": stats()})
+    demo = ws.query_params.get("demo") == "1"
+    EXPLORE[ws] = demo
+    await send(ws, {"type": "coins", "coins": [c.summary() for c in listed(demo)], "stats": stats(demo)})
     try:
         while True:
             await ws.receive_text()

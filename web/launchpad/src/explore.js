@@ -148,9 +148,9 @@ function apply(m) {
   $('#lately').replaceChildren(h('span', { class: 'lbl' }, 'awake now'), ...lately.map((c) => h('span', {}, h('b', {}, `$${c.ticker}`), ` ${pct(c.change_5m)} · ${(STATUS[c.status] || c.status).toLowerCase()}`)));
   render();
 }
-get('api/coins').then(apply).catch(() => { $('#stats').replaceChildren(h('div', {}, h('b', {}, 'offline'), h('span', {}, 'the androids are resting'))); });
+get(`api/coins${DEMO ? '?demo=1' : ''}`).then(apply).catch(() => { $('#stats').replaceChildren(h('div', {}, h('b', {}, 'offline'), h('span', {}, 'the androids are resting'))); });
 function connect() {
-  const ws = new WebSocket(wsUrl('api/ws/explore'));
+  const ws = new WebSocket(`${wsUrl('api/ws/explore')}${DEMO ? '?demo=1' : ''}`);
   ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (m.type === 'coins') apply(m); };
   ws.onclose = () => setTimeout(connect, 3000);
 }
