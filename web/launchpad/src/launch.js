@@ -50,6 +50,7 @@ function sliders() {
 function preview() {
   if (!stage.face.uniforms) return;
   stage.face.setLook(look);
+  stage.prepare();   // a new skin's shaders compile in the background (the page doesn't freeze on a click)
   stage.face.setEmotion(Object.fromEntries(ORDER.map((e) => [e, (temp[e] || 0) * 0.8])));
   $('#pv-name').textContent = form.name.value || 'Your android';
 }

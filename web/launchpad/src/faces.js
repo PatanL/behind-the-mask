@@ -54,11 +54,13 @@ export class FaceWall {
     camera.position.set(0, 0.03, 0.82); camera.lookAt(0, 0.0, 0.03);
     const face = new AndroidFace(scene, `${import.meta.env.BASE_URL}face/android.glb`, { camera, seed, castShadow: false, textTarget: { x: 0, y: -0.9 } });
     const slot = { el, frame, ctx: frame.getContext('2d'), scene, camera, face, look, ready: false, last: 0, asleep: false };
-    face.ready.then(() => {
+    face.ready.then(async () => {
       lights(scene, face.root);
       face.setGaze('camera');
       face.setFaceDetail({ wrinkles: 2 });
       if (look) face.setLook(look);
+      // its shaders compile in the background before it's first drawn (compiling on first draw froze a phone for ~2 s)
+      await Promise.race([this.renderer.compileAsync(scene, camera).catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
       slot.ready = true;
     }).catch(() => {});
     this.slots.set(el, slot);

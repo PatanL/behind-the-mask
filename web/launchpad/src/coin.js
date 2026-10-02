@@ -26,8 +26,8 @@ try { const shot = sessionStorage.getItem(`lp-shot-${id}`); if (shot) { shotEl.s
 let shown = false;
 async function reveal() {
   if (shown) return; shown = true;
-  // its new materials compiled before showing (but a slow phone doesn't wait for it)
-  try { await Promise.race([stage.renderer.compileAsync?.(stage.scene, stage.camera), new Promise((r) => setTimeout(r, 600))]); } catch { /* */ }
+  // its new materials compiled (in the background) before showing
+  try { await stage.prepare(); } catch { /* */ }
   requestAnimationFrame(() => requestAnimationFrame(() => {
     faceEl.style.opacity = '1'; performance.mark('face-shown');
     if (!shotEl.hidden) { shotEl.style.opacity = '0'; setTimeout(() => { shotEl.hidden = true; }, 600); }
@@ -44,7 +44,7 @@ function look(d) {
   if (!stage.face.uniforms) return;
   stage.face.setLook(d.look || {});
   stage.face.setSleep(d.status === 'asleep' ? 1 : 0);
-  reveal();
+  if (shown) stage.prepare(); else reveal();   // (a changed look's shaders compile in the background too)
 }
 
 // ---- the words, revealed at a speaking pace, as the exhibit's subtitles (tinted by the feeling they carry)

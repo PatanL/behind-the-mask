@@ -60,7 +60,7 @@ export class Stage {
       { pr: 0.8, msaa: 0, bloom: false, shadow: 1024 },
       { pr: 0.6, msaa: 0, bloom: false, shadow: 512 },
     ] });
-    this.face.ready.then(() => this.gov.arm()).catch(() => {});
+    this.face.ready.then(() => { this.gov.arm(); return this.prepare(); }).catch(() => {});
     this.clock = new THREE.Clock();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(canvas);
@@ -91,6 +91,14 @@ export class Stage {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Compile the scene's shaders in the background, drawing nothing new meanwhile (compiling on the first draw holds
+   *  up the whole page: ~2 s on a phone). Call again after a change of look; resolves when it's ready (3 s at most). */
+  prepare() {
+    const p = Promise.race([this.renderer.compileAsync(this.scene, this.camera).catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
+    this.compiling = (this.compiling || 0) + 1;
+    return p.finally(() => { this.compiling -= 1; });
+  }
+
   /** One quality step: pixel ratio (capped by the screen's), MSAA samples, bloom, the key light's shadow map size. */
   quality(q) {
     const pr = Math.min(window.devicePixelRatio || 1, q.pr);
@@ -110,6 +118,7 @@ export class Stage {
   setGlow(v) { this.glowTarget = v; }
 
   render() {
+    if (this.compiling || !this.face.uniforms) return;   // (not until its shaders are ready: see prepare)
     this.gov.frame(performance.now());
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
     if (!this.paused) this.face.update(dt);   // the face keeps its own monotonic time (QA can pause and settle())
