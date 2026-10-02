@@ -81,7 +81,7 @@ function sorted() {
 function card(c) {
   const box = h('div', { class: 'face-box' });
   if (c.img) box.append(h('img', { class: 'portrait', src: imgUrl(c.img), alt: '' }));
-  const el = h('a', { class: 'card', href: `coin?id=${encodeURIComponent(c.id)}`, 'data-id': c.id },
+  const el = h('a', { class: 'card', href: `coin?id=${encodeURIComponent(c.id)}${DEMO ? '&demo=1' : ''}`, 'data-id': c.id },
     box, h('span', { class: 'status' }),
     h('div', { class: 'body' },
       h('div', { class: 'who' }, h('b', {}, c.name), h('span', { class: 'tk mono' }, `$${c.ticker}`)),
