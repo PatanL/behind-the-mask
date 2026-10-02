@@ -715,6 +715,16 @@ async def explore_loop():
                         o.put(data)
 
 
+async def ping_loop():
+    """Every open page hears from the server at least every 25 s (a proxy closes a socket that goes quiet: Cloudflare
+    after ~100 s); pages ignore it."""
+    data = json.dumps({"type": "ping"})
+    while True:
+        await asyncio.sleep(25)
+        for o in list(OUT.values()):
+            o.put(data)
+
+
 async def state_loop():
     while True:
         await asyncio.sleep(1.0 if sum(len(c.clients) for c in COINS.values()) < 500 else 2.0)
@@ -761,6 +771,7 @@ async def startup():
     asyncio.ensure_future(explore_loop())
     asyncio.ensure_future(lp_pump.sol_price_loop())
     asyncio.ensure_future(state_loop())
+    asyncio.ensure_future(ping_loop())
 
 
 @app.get("/api/status")
@@ -940,17 +951,27 @@ def api_pump_status():
     return {"launch": lp_pump.PUMP_LAUNCH, "feed": FEED.connected, "paired": len(FEED.markets), "treasury": st["treasury"] or None, "alt": st["alt"] or None}
 
 
-RPC_METHODS = {"getLatestBlockhash", "getAccountInfo", "getMultipleAccounts", "getSignatureStatuses", "getMinimumBalanceForRentExemption",
-               "getSlot", "getBalance", "getFeeForMessage", "getRecentPrioritizationFees", "getTokenAccountBalance", "simulateTransaction"}
+# only what the launch and setup pages read (pump.fun's global accounts, the lookup table, a blockhash, a slot,
+# signature statuses); nothing that sends
+RPC_METHODS = {"getLatestBlockhash", "getAccountInfo", "getMultipleAccounts", "getSignatureStatuses", "getSlot",
+               "getMinimumBalanceForRentExemption"}
+RPC_PER_SOURCE, RPC_PER_MINUTE = 60, 600      # calls a minute: from one address, and in all (a launch makes ~5)
+RPC_LOG: list = []                            # (time, source, calls)
 
 
 @app.post("/api/rpc")
 async def api_rpc(req: Request):
-    """The launch page's Solana reads, through this server (one place for the RPC provider; reads only, no sending)."""
+    """The launch page's Solana reads, through this server (one place for the RPC provider; reads only, no sending;
+    rate-limited, so it can't be used as a free RPC by others and exhaust the provider's limit our launches need)."""
     body = await req.json()
     calls = body if isinstance(body, list) else [body]
     if len(calls) > 20 or any(not isinstance(c, dict) or c.get("method") not in RPC_METHODS for c in calls):
         raise HTTPException(400, "Not an allowed RPC call.")
+    now, src = time.time(), (req.headers.get("x-forwarded-for", "").split(",")[0].strip() or (req.client.host if req.client else "?"))
+    RPC_LOG[:] = [x for x in RPC_LOG if now - x[0] < 60]
+    if sum(n for _, _, n in RPC_LOG) + len(calls) > RPC_PER_MINUTE or sum(n for _, s_, n in RPC_LOG if s_ == src) + len(calls) > RPC_PER_SOURCE:
+        raise HTTPException(429, "Too many requests. Try again in a minute.")
+    RPC_LOG.append((now, src, len(calls)))
     async with httpx.AsyncClient(timeout=20) as cl:
         r = await cl.post(lp_pump.RPC, json=body)
     return JSONResponse(r.json(), status_code=r.status_code)
