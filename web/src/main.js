@@ -490,6 +490,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   window.__btm = { state, play, stage, speech, THREE, newPerformance, performToken, meanE, ORDER };
   // an acting preset baked into a test build (VITE_LIVELY='{"moment":1,...}'); the public build has none
   try { if (import.meta.env.VITE_LIVELY) Object.assign(stage.face.lively, JSON.parse(import.meta.env.VITE_LIVELY)); } catch (e) { console.warn('VITE_LIVELY', e); }
-  // a motion-matching library of performance moments, where one is installed (not part of the public site)
-  fetch(new URL('face/moments.json', document.baseURI)).then((r) => (r.ok ? r.json() : null)).then((lib) => lib?.moments && stage.face.setMoments(lib)).catch(() => {});
+  // a motion-matching library of performance moments (~1 MB over the wire): fetched once the face is up, so the face
+  // model gets the whole connection first; until it arrives the face acts on its own
+  stage.ready.then(() => new Promise((r) => setTimeout(r, 1200)))
+    .then(() => fetch(new URL('face/moments.json', document.baseURI))).then((r) => (r.ok ? r.json() : null))
+    .then((lib) => lib?.moments && stage.face.setMoments(lib)).catch(() => {});
 })();

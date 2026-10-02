@@ -191,7 +191,11 @@ function connect() {
   ws = new WebSocket(wsUrl(`api/ws/coin/${encodeURIComponent(id)}`) + `?cid=${cid}`);
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.type === 'state') { const was = info?.status; apply(m); if (was && was !== m.status) onStatus(was, m.status); }
+    if (m.type === 'state') {
+      if (m.id && m.id !== id) id = m.id;   // opened by its mint (the pump.fun website): trades and reconnects use its id
+      const was = info?.status; apply(m); if (was && was !== m.status) onStatus(was, m.status);
+    }
+    else if (m.type === 'error') { $('#name').textContent = 'No such coin'; gone = true; }
     else if (m.type === 'series') { series = m.series; chart(); }
     else if (m.type === 'nonce') nonceMsg = m.message;
     else if (m.type === 'wallet_ok') { walletAddr = m.address; $('#wallet-b').hidden = true; $('#wallet-s').textContent = `${m.address.slice(0, 4)}…${m.address.slice(-4)} · holds ${m.holds ? m.holds.toLocaleString() : 'none'} · your taps count ×${m.weight.toFixed(1)}`; }
@@ -205,7 +209,7 @@ function connect() {
     else if (m.type === 'ask_ok' || m.type === 'ask_mine') { mine = { id: m.id, q: m.q }; $('#ask-in').value = ''; askNote = null; nextAskAt = Date.now() + 1000 * (m.type === 'ask_ok' ? m.gap || askGap : m.wait || 0); askView(); }
     else if (m.type === 'ask_err') { if (m.why === 'wait') nextAskAt = Date.now() + 1000 * (m.wait || 0); else askNote = { text: m.why, until: Date.now() + 6000 }; askView(); }
   };
-  ws.onclose = () => setTimeout(connect, 2500);
+  ws.onclose = () => { if (!gone) setTimeout(connect, 2500); };
 }
 function onStatus(was, now) {
   if (was === 'asleep' && now !== 'asleep') { stage.face.setSleep(0); stage.face.startle(); }
@@ -215,9 +219,6 @@ for (const b of document.querySelectorAll('#demo .btn')) b.onclick = () => post(
 addEventListener('resize', chart);
 
 if (!id) location.replace('./');   // no coin named: the home page's android
-(id ? Promise.resolve(id) : new Promise(() => {}))
-  .then(() => get(`api/coins/${encodeURIComponent(id)}`)).then((d) => {
-  id = d.id || id;   // opened by its mint (the pump.fun website): the live socket and trades use its id
-  apply(d); series = d.series || []; chart();
-  connect();
-}).catch(() => { $('#name').textContent = 'No such coin'; });
+// the live socket's first messages are the coin's state and its chart: no separate request (one round trip less)
+let gone = false;   // (no such coin: don't keep reconnecting)
+if (id) connect();
