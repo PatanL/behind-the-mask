@@ -15,12 +15,28 @@ const DEMO = Q.has('demo');   // simulated markets are shown only in demo mode
 const cid = visitorId();
 const stage = new Stage($('#face'));
 let perf = null, info = null, ws = null, series = [], queue = [], text = [];
-stage.ready.then(() => { perf = new Performer(stage.face); if (info?.mu) perf.reset(info.mu); if (info) look(info); });
+// the face stays hidden until it wears its own look (no flash of the default android): the explore card hands its
+// look over on the click, so it can be applied the moment the face loads; a direct link waits for the coin's data
+let early = null;
+try { early = JSON.parse(sessionStorage.getItem(`lp-look-${id}`) || 'null'); } catch { /* */ }
+const faceEl = $('#face'); faceEl.style.opacity = '0'; faceEl.style.transition = 'opacity 0.45s ease';
+let shown = false;
+async function reveal() {
+  if (shown) return; shown = true;
+  try { await stage.renderer.compileAsync?.(stage.scene, stage.camera); } catch { /* */ }   // its new materials, before showing
+  requestAnimationFrame(() => requestAnimationFrame(() => { faceEl.style.opacity = '1'; }));
+}
+setTimeout(() => { shown || reveal(); }, 4000);   // (never leave it hidden)
+stage.ready.then(() => {
+  perf = new Performer(stage.face); if (info?.mu) perf.reset(info.mu);
+  if (info) look(info); else if (early) { stage.face.setLook(early); reveal(); }
+});
 
 function look(d) {
   if (!stage.face.uniforms) return;
   stage.face.setLook(d.look || {});
   stage.face.setSleep(d.status === 'asleep' ? 1 : 0);
+  reveal();
 }
 
 // ---- the words, revealed at a speaking pace, as the exhibit's subtitles (tinted by the feeling they carry)

@@ -11,6 +11,12 @@ const DEMO = new URLSearchParams(location.search).has('demo');
 const wall = new FaceWall();
 let coins = [], sort = localStorage.getItem('lp-sort') || 'new', filter = 'all';
 const cards = new Map();   // id -> {el, slot, lift, lastLine}
+// opening a card: hand its look to the coin page, so its face appears in it straight away
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a.card'); if (!a) return;
+  const c = cards.get(a.dataset.id); if (!c?.coin?.look) return;
+  try { sessionStorage.setItem(`lp-look-${c.coin.id}`, JSON.stringify(c.coin.look)); } catch { /* */ }
+}, true);
 
 // ---- $STEER at the top: the home page's android, live (a light feed of its words and readouts)
 const sx = { slot: wall.attach($('#sx-box'), { look: { skin: 'porcelain', eye: '#7fe7ff' }, seed: 11 }), perf: null, words: [], queue: [], timer: 0, plain: [], L: null };
