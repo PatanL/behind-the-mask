@@ -566,7 +566,11 @@ async def schedule():
     score = lambda c: ((1e6 if c.d.get("featured") else 0) - (1e7 if c.market.kind == "sim" else 0)
                        + 90 * math.log2(1 + len(c.clients)) + (0.0 if speaking(c) else now - getattr(c, "spoke_at", 0.0)))
     order = sorted(alive, key=score, reverse=True)
-    want = set(x.id for x in order[:cap])
+    # demo coins talk only while someone can see them (a demo explore page or their own page): unwatched, they'd
+    # still read every weight each step and take memory bandwidth from the coins and the home android people watch
+    demo_open = any(EXPLORE.values())
+    wanted = [c for c in order if c.market.kind != "sim" or demo_open or c.clients][:cap]
+    want = set(x.id for x in wanted)
     talking = [c for c in order if speaking(c)]
     for c in reversed(talking[cap:]):     # the cap shrank: the least wanted stop now
         await take_slot(c)
@@ -574,7 +578,7 @@ async def schedule():
     for c in talking:
         c.yield_after_turn = c.id not in want
     free = cap - len(talking)
-    for c in order[:cap]:
+    for c in wanted:
         if speaking(c) or c.status != "listening":
             continue
         if free > 0:
