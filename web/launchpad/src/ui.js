@@ -30,7 +30,7 @@ export function footer() {
   const base = import.meta.env.BASE_URL;
   if (document.querySelector('body > footer')) return;
   document.body.append(h('footer', {}, h('span', {}, 'Steer AI · every coin has a live android'), h('a', { href: base }, 'Live'), h('a', { href: `${base}explore` }, 'Explore'), h('a', { href: `${base}launch` }, 'Launch'),
-    h('a', { href: `${base}docs` }, 'Docs')));
+    h('a', { href: `${base}docs` }, 'Docs'), h('span', { class: 'nfa' }, 'Not financial advice. Coins launched here are memecoins on pump.fun: trade only what you can afford to lose.')));
 }
 /** dollars, short: $940, $12.3K, $4.56M (SOL amounts times SOL's dollar price) */
 export function usd(x) {
