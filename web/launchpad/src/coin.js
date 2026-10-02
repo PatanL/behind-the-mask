@@ -1,6 +1,6 @@
 // One coin's android, live: its face and words, its chart, steering it, asking it things.
 import { get, post, wsUrl, visitorId, api } from './api.js';
-import { $, h, header, footer, sol, pct, left, feelBar, STATUS } from './ui.js';
+import { $, h, header, footer, sol, pct, left, feelBar, STATUS, inUsd } from './ui.js';
 import { Performer } from './feel.js';
 import { Stage } from '../../src/stage.js';
 import { Speech } from '../../src/speech.js';
@@ -136,7 +136,7 @@ function apply(d) {
   $('#nocoin').textContent = `$${d.ticker} hasn't launched yet.`;
   $('#price').textContent = d.price ? `${d.price.toExponential(3)} SOL` : '—';
   const ch = $('#chg'); ch.textContent = `${pct(d.change_5m)} 5m`; ch.className = `mono ${d.change_5m >= 0 ? 'up' : 'down'}`;
-  $('#mcap').textContent = sol(d.mcap_sol, 1); $('#vol').textContent = sol(d.volume_sol, 1);
+  $('#mcap').textContent = inUsd(d.mcap_sol, d.sol_usd); $('#vol').textContent = inUsd(d.volume_sol, d.sol_usd);
   $('#curve').textContent = `${Math.round((d.curve || 0) * 100)}%`; $('#left').textContent = left(d.time_left);
   $('#demo').hidden = d.market !== 'sim' || !DEMO;
   $('#sleep-note').hidden = d.status !== 'asleep';

@@ -679,6 +679,7 @@ def coin_state(c: Coin, cid: str | None = None) -> dict:
              qids=[q["id"] for q in c.questions], asking=c.asking["q"] if c.asking else None, asking_id=c.asking["id"] if c.asking else None,
              persona=c.d["persona"], steer_mode=c.d.get("steer_mode"), concept_full=c.d.get("concept"), temperament_mix=c.d.get("temperament"),
              balance_sol=round(c.balance(), 6), fees_sol=round(c.market.fees_sol, 6))
+    s["sol_usd"] = lp_pump.SOL_USD["usd"]
     return s
 
 
@@ -743,7 +744,7 @@ def listed(demo: bool = False) -> list:
 def stats(demo: bool = False) -> dict:
     cs = listed(demo)
     return {"coins": len(cs), "awake": sum(c.status != "asleep" for c in cs), "compute_sol": round(sum(c.market.fees_sol for c in cs), 4),
-            "volume_sol": round(sum(c.market.volume_sol for c in cs), 3), "loading": ENGINE["loading"]}
+            "volume_sol": round(sum(c.market.volume_sol for c in cs), 3), "loading": ENGINE["loading"], "sol_usd": lp_pump.SOL_USD["usd"]}
 
 
 # ---------------------------------------------------------------------------------------------- the app
@@ -771,6 +772,7 @@ async def startup():
         if c.market.kind == "pump" and not c.market.history:
             asyncio.ensure_future(c.market.seed())
     asyncio.ensure_future(explore_loop())
+    asyncio.ensure_future(lp_pump.sol_price_loop())
     asyncio.ensure_future(state_loop())
 
 
@@ -808,7 +810,7 @@ def api_coins(sort: str = "new", demo: int = 0):
 
 
 def find(cid: str):
-    """A coin by its id, or by its mint (a launched coin's pump.fun website links to coin.html?mint=...)."""
+    """A coin by its id, or by its mint (a launched coin's pump.fun website links to coin?mint=...)."""
     return COINS.get(cid) or next((x for x in COINS.values() if x.d.get("mint") and x.d["mint"] == cid), None)
 
 

@@ -1,7 +1,7 @@
 // Explore: the platform's own android live, then every coin's android -- awake ones live, asleep ones breathing.
 import './style.css';
 import { get, wsUrl, imgUrl } from './api.js';
-import { $, h, header, footer, sol, pct, left, feelBar, STATUS } from './ui.js';
+import { $, h, header, footer, sol, pct, left, feelBar, STATUS, inUsd } from './ui.js';
 import { FaceWall } from './faces.js';
 import { faceFrom, Performer } from './feel.js';
 import { ORDER, EMO } from '../../src/palette.js';
@@ -81,7 +81,7 @@ function sorted() {
 function card(c) {
   const box = h('div', { class: 'face-box' });
   if (c.img) box.append(h('img', { class: 'portrait', src: imgUrl(c.img), alt: '' }));
-  const el = h('a', { class: 'card', href: `coin.html?id=${encodeURIComponent(c.id)}`, 'data-id': c.id },
+  const el = h('a', { class: 'card', href: `coin?id=${encodeURIComponent(c.id)}`, 'data-id': c.id },
     box, h('span', { class: 'status' }),
     h('div', { class: 'body' },
       h('div', { class: 'who' }, h('b', {}, c.name), h('span', { class: 'tk mono' }, `$${c.ticker}`)),
@@ -99,7 +99,7 @@ function update(c, d) {
   c.el.classList.toggle('asleep', d.status === 'asleep');
   c.el.querySelector('.line').textContent = d.status === 'asleep' ? 'Asleep. A trade will wake it.' : (d.line || '…').trim().slice(-130);
   const real = d.market !== 'sim' || DEMO;
-  c.el.querySelector('.mcap').textContent = real ? sol(d.mcap_sol, 1) : 'not yet';
+  c.el.querySelector('.mcap').textContent = real ? inUsd(d.mcap_sol, solUsd) : 'not yet';
   const ch = c.el.querySelector('.chg'); ch.textContent = real ? pct(d.change_5m) : '—'; ch.className = `chg ${d.change_5m >= 0 ? 'up' : 'down'}`;
   c.el.querySelector('.tl').textContent = left(d.time_left);
   // feelings: the readout above its own baseline, through the exhibit's decoder
@@ -139,10 +139,12 @@ function render() {
 }
 
 // ---- data
+let solUsd = null;   // SOL's dollar price, from the server
 function apply(m) {
   coins = m.coins;
   const s = m.stats;
-  $('#stats').replaceChildren(...[[s.coins, 'coins'], [s.awake, 'awake'], [s.compute_sol.toFixed(3), 'SOL compute'], [s.volume_sol.toFixed(1), 'SOL traded']]
+  if (s.sol_usd) solUsd = s.sol_usd;
+  $('#stats').replaceChildren(...[[s.coins, 'coins'], [s.awake, 'awake'], [s.compute_sol.toFixed(3), 'SOL compute'], [inUsd(s.volume_sol, solUsd), 'traded']]
     .map(([v, k]) => h('div', {}, h('b', {}, String(v)), h('span', {}, k))));
   const lately = coins.filter((c) => c.status !== 'asleep').slice(0, 8);
   $('#lately').replaceChildren(h('span', { class: 'lbl' }, 'awake now'), ...lately.map((c) => h('span', {}, h('b', {}, `$${c.ticker}`), ` ${pct(c.change_5m)} · ${(STATUS[c.status] || c.status).toLowerCase()}`)));

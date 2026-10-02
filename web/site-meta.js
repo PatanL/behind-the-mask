@@ -14,7 +14,7 @@ export function siteMeta(path = '') {
       const title = (html.match(/<title>([^<]*)<\/title>/) || [])[1] || 'Steer AI';
       const desc = (html.match(/<meta name="description" content="([^"]*)"/) || [])[1] || '';
       const page = ctx.filename.split('/').pop().replace(/\.html$/, '');
-      const url = `${SITE}${ROOT}${path}${page === 'index' ? '' : `${page}.html`}`;
+      const url = `${SITE}${ROOT}${path}${page === 'index' ? '' : page}`;
       const m = (attrs) => ({ tag: 'meta', attrs, injectTo: 'head' });
       const l = (attrs) => ({ tag: 'link', attrs, injectTo: 'head' });
       return [

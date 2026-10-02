@@ -181,9 +181,31 @@ class PumpFeed:
 FEED = PumpFeed()
 
 
+SOL_USD = {"usd": None, "t": 0.0}   # SOL's dollar price (pages show market caps in $), refreshed every minute
+PRICE_SOURCES = [
+    ("https://lite-api.jup.ag/price/v3?ids=So11111111111111111111111111111111111111112", lambda j: j["So11111111111111111111111111111111111111112"]["usdPrice"]),
+    ("https://api.coinbase.com/v2/prices/SOL-USD/spot", lambda j: j["data"]["amount"]),
+    ("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd", lambda j: j["solana"]["usd"]),
+]
+
+
+async def sol_price_loop():
+    while True:
+        async with httpx.AsyncClient(timeout=10) as cl:
+            for url, pick in PRICE_SOURCES:
+                try:
+                    v = float(pick((await cl.get(url)).json()))
+                    if v > 0:
+                        SOL_USD.update(usd=round(v, 2), t=time.time())
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+        await asyncio.sleep(60)
+
+
 def live_url(mint: str) -> str:
     """A launched coin's website on pump.fun: its android's live stream (always; the creator can't point it elsewhere)."""
-    return f"{SITE}/coin.html?mint={mint}"
+    return f"{SITE}/coin?mint={mint}"
 
 
 async def prepare(f: dict) -> dict:

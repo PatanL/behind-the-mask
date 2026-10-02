@@ -12,12 +12,12 @@ export function header(on) {
   const base = import.meta.env.BASE_URL;
   const el = h('header', { class: 'top' },
     h('a', { class: 'brand', href: base }, h('span', { class: 'eye' }), 'Steer AI'),
-    h('nav', { class: 'nav' }, ...[['Live', base], ['Explore', `${base}explore.html`], ['Launch', `${base}launch.html`], ['Docs', `${base}docs.html`]].map(([t, u]) => h('a', { href: u, class: on === t ? 'on' : '' }, t))),
+    h('nav', { class: 'nav' }, ...[['Live', base], ['Explore', `${base}explore`], ['Launch', `${base}launch`], ['Docs', `${base}docs`]].map(([t, u]) => h('a', { href: u, class: on === t ? 'on' : '' }, t))),
     h('div', { class: 'sp' }),
-    h('a', { class: 'top-link', href: `${base}docs.html` }, 'How it works'),
+    h('a', { class: 'top-link', href: `${base}docs` }, 'How it works'),
     h('a', { class: 'top-link x-link', href: 'https://x.com/steerailive', target: '_blank', rel: 'noopener', 'aria-label': 'Steer AI on X', title: 'Steer AI on X (@steerailive)' }),
     h('button', { class: 'btn wallet-b', id: 'wallet-top', type: 'button' }, 'Connect wallet'),
-    h('a', { class: 'btn primary', href: `${base}launch.html` }, 'Launch a coin'));
+    h('a', { class: 'btn primary', href: `${base}launch` }, 'Launch a coin'));
   el.querySelector('.x-link').innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></svg>`;
   document.body.prepend(el);
   const b = el.querySelector('#wallet-top');
@@ -26,9 +26,16 @@ export function header(on) {
 }
 export function footer() {
   const base = import.meta.env.BASE_URL;
-  document.body.append(h('footer', {}, h('span', {}, 'Steer AI · every coin has a live android'), h('a', { href: base }, 'Live'), h('a', { href: `${base}explore.html` }, 'Explore'), h('a', { href: `${base}launch.html` }, 'Launch'),
-    h('a', { href: `${base}docs.html` }, 'Docs')));
+  document.body.append(h('footer', {}, h('span', {}, 'Steer AI · every coin has a live android'), h('a', { href: base }, 'Live'), h('a', { href: `${base}explore` }, 'Explore'), h('a', { href: `${base}launch` }, 'Launch'),
+    h('a', { href: `${base}docs` }, 'Docs')));
 }
+/** dollars, short: $940, $12.3K, $4.56M (SOL amounts times SOL's dollar price) */
+export function usd(x) {
+  if (x == null || !isFinite(x)) return '—';
+  const a = Math.abs(x);
+  return a >= 1e9 ? `$${(x / 1e9).toFixed(2)}B` : a >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : a >= 1e3 ? `$${(x / 1e3).toFixed(1)}K` : `$${x.toFixed(0)}`;
+}
+export const inUsd = (solAmount, solUsd, d = 1) => (solUsd ? usd(solAmount * solUsd) : sol(solAmount, d));
 export const sol = (x, d = 3) => (x == null ? '—' : `${x < 0.001 && x > 0 ? x.toExponential(1) : x.toFixed(d)} SOL`);
 export const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(x !== 0 && Math.abs(x) < 0.1 ? 1 : 0)}%`);
 export function left(s) {

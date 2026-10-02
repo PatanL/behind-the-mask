@@ -104,7 +104,7 @@ form.onsubmit = async (e) => {
       body.market = 'pair';
     }
     const r = await post('api/coins', body);
-    location.href = `coin.html?id=${encodeURIComponent(r.id)}`;
+    location.href = `coin?id=${encodeURIComponent(r.id)}`;
   } catch (err) {
     $('#err').textContent = err.message || String(err);
     $('#go').disabled = false; $('#go').textContent = market === 'pump' ? 'Launch on pump.fun' : 'Launch demo';
