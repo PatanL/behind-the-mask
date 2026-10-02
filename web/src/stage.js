@@ -6,6 +6,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { AndroidFace } from './face/face.js';
 import { createFaceStage } from './face/stage.js';
+import { Governor, startTier } from './quality.js';
 
 export class Stage {
   constructor(canvas) {
@@ -50,6 +51,16 @@ export class Stage {
     this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.3, 0.45, 0.95);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
+    // smooth before sharp: drop resolution, anti-aliasing, glow and shadow detail when frames run late (see quality.js)
+    this.gov = new Governor({ name: 'face', start: startTier(), apply: (q) => this.quality(q), tiers: [
+      { pr: 2, msaa: 4, bloom: true, shadow: 4096 },
+      { pr: 1.5, msaa: 4, bloom: true, shadow: 2048 },
+      { pr: 1.25, msaa: 2, bloom: true, shadow: 2048 },
+      { pr: 1, msaa: 0, bloom: true, shadow: 1024 },
+      { pr: 0.8, msaa: 0, bloom: false, shadow: 1024 },
+      { pr: 0.6, msaa: 0, bloom: false, shadow: 512 },
+    ] });
+    this.face.ready.then(() => this.gov.arm()).catch(() => {});
     this.clock = new THREE.Clock();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(canvas);
@@ -80,6 +91,17 @@ export class Stage {
     this.camera.updateProjectionMatrix();
   }
 
+  /** One quality step: pixel ratio (capped by the screen's), MSAA samples, bloom, the key light's shadow map size. */
+  quality(q) {
+    const pr = Math.min(window.devicePixelRatio || 1, q.pr);
+    this.renderer.setPixelRatio(pr); this.composer.setPixelRatio(pr);
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) if (rt.samples !== q.msaa) { rt.samples = q.msaa; rt.dispose(); }
+    this.bloom.enabled = q.bloom;
+    const sh = this.lights.key.shadow;
+    if (sh.mapSize.x !== q.shadow) { sh.mapSize.set(q.shadow, q.shadow); sh.map?.dispose(); sh.map = null; }
+    this.resize();
+  }
+
   setPushColor(hex, amount) {
     this.auraTarget.color.set(hex); this.auraTarget.amt = amount;
     if (this.face.uniforms) this.face.uniforms.uGlowColor.value.set(hex);
@@ -88,6 +110,7 @@ export class Stage {
   setGlow(v) { this.glowTarget = v; }
 
   render() {
+    this.gov.frame(performance.now());
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
     if (!this.paused) this.face.update(dt);   // the face keeps its own monotonic time (QA can pause and settle())
     const u = this.aura.material.uniforms;

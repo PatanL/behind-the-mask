@@ -4,8 +4,9 @@
 import * as THREE from 'three';
 import { AndroidFace } from '../../src/face/face.js';
 import { createStudioEnvironment } from '../../src/face/stage.js';
+import { Governor, startTier } from '../../src/quality.js';
 
-const MAX = 640;   // a frame's largest side in pixels (the offscreen canvas is this big)
+const MAX = 640;   // a frame's largest side in pixels at full quality (the offscreen canvas is this big)
 
 function lights(scene, target) {
   const g = new THREE.Group();
@@ -32,6 +33,11 @@ export class FaceWall {
     this.env = createStudioEnvironment(r);
     this.slots = new Map();
     this.clock = new THREE.Clock();
+    // smooth before sharp: smaller frames, then each face drawn every other / third frame, when frames run late
+    this.max = MAX; this.every = 1; this.n = 0;
+    this.gov = new Governor({ name: 'faces', start: startTier() ? 1 : 0, apply: (q) => { this.max = q.max; this.every = q.every; r.setSize(q.max, q.max, false); },
+      tiers: [{ max: MAX, every: 1 }, { max: 512, every: 1 }, { max: 400, every: 2 }, { max: 320, every: 3 }] });
+    this.gov.arm(4000);
     const loop = () => { this.render(); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
@@ -68,14 +74,17 @@ export class FaceWall {
   }
 
   render() {
-    const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime, r = this.renderer, dpr = Math.min(devicePixelRatio || 1, 2);
+    this.gov.frame(performance.now());
+    const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime, r = this.renderer, dpr = Math.min(devicePixelRatio || 1, 2), MX = this.max;
+    let i = 0; this.n++;
     for (const s of this.slots.values()) {
       if (!s.ready || !s.el.isConnected) continue;
       const b = s.el.getBoundingClientRect();
       if (b.bottom < -50 || b.top > innerHeight + 50 || b.width < 4) continue;
+      if (this.every > 1 && (this.n + i++) % this.every) continue;   // round robin: this face waits a frame
       if (t - s.last < (s.asleep ? 1 / 8 : 0)) continue;   // asleep: a few frames a second is plenty
       s.face.update(Math.min(0.2, t - (s.lastT ?? t) || dt)); s.lastT = t; s.last = t;
-      const k = Math.min(1, MAX / Math.max(b.width * dpr, b.height * dpr));
+      const k = Math.min(1, MX / Math.max(b.width * dpr, b.height * dpr));
       const w = Math.round(b.width * dpr * k), h = Math.round(b.height * dpr * k);
       if (s.frame.width !== w || s.frame.height !== h) { s.frame.width = w; s.frame.height = h; }
       s.camera.aspect = w / h; s.camera.updateProjectionMatrix();
@@ -83,7 +92,7 @@ export class FaceWall {
       r.render(s.scene, s.camera);
       // the rendered corner (bottom-left in GL terms is the canvas's bottom rows) into this card's frame
       s.ctx.clearRect(0, 0, w, h);
-      s.ctx.drawImage(r.domElement, 0, MAX - h, w, h, 0, 0, w, h);
+      s.ctx.drawImage(r.domElement, 0, MX - h, w, h, 0, 0, w, h);
     }
   }
 }
