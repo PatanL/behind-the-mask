@@ -45,7 +45,7 @@ function card(c) {
   const el = h('a', { class: 'card', href: `coin.html?id=${encodeURIComponent(c.id)}`, 'data-id': c.id },
     box, h('span', { class: 'status' }),
     h('div', { class: 'body' },
-      h('div', { class: 'who' }, h('b', {}, c.name), h('span', { class: 'tk mono' }, `$${c.ticker}`), h('span', { class: 'model' }, c.model === 'qwen3.5-9b' ? 'Qwen3.5-9B' : c.model)),
+      h('div', { class: 'who' }, h('b', {}, c.name), h('span', { class: 'tk mono' }, `$${c.ticker}`)),
       h('div', { class: 'line' }), h('div', { class: 'feelbar' }),
       h('div', { class: 'nums mono' }, h('div', {}, 'Mcap', h('b', { class: 'mcap' })), h('div', {}, '5 min', h('b', { class: 'chg' })), h('div', {}, 'Awake for', h('b', { class: 'tl' })))));
   return { el, box, coin: c, slot: null, lift: ORDER.map(() => 0), lastLine: '', said: 0 };

@@ -32,15 +32,15 @@ export const HOW_STEPS = [
   },
   {
     title: 'It also has a direction for being an assistant',
-    body: `<p>We had it answer questions as itself, then as 30 characters (a pirate, a ghost, a cat, a poet…). The difference is the <b>assistant axis</b>, a direction researchers found in many chat models in 2026. The <b>Mask</b> meter shows how assistant-like its state is right now.</p><p>Push against it, and the helpful assistant starts to fade into someone else.</p>`,
+    body: `<p>We had it answer questions as itself, then as 30 characters (a pirate, a ghost, a cat, a poet…). The difference is the <b>assistant axis</b>, a direction researchers found in many chat models in 2026. The <b>Assistant voice</b> meter shows how assistant-like its state is right now.</p><p>Push it <b>off script</b> (against that direction), and the helpful assistant starts to fade into someone else.</p>`,
   },
   {
     title: 'Watching individual ideas light up',
     body: `<p>Qwen, the team that built this model, released <b>sparse autoencoders</b> (Qwen-Scope, 2026). These are tools that split the hidden state into about 65,000 separate "features". Most of the time only 50 are active. We asked the model to name each feature from the text that triggers it most. The <b>Lighting up inside</b> list shows a few of them as it writes.</p>`,
   },
   {
-    title: 'And behind the mask…',
-    body: `<p>The polite assistant voice isn't the raw model. It started as a <b>base model</b> trained only to continue internet text, then got extra training to act as a helpful assistant, using human feedback (RLHF). After each answer you can peek at the base model: same kind of AI, no mask.</p>`,
+    title: 'And under the assistant voice…',
+    body: `<p>The polite assistant voice isn't the raw model. It started as a <b>base model</b> trained only to continue internet text, then got extra training to act as a helpful assistant, using human feedback (RLHF). After each answer you can peek at the base model: the same kind of AI, without the assistant voice.</p>`,
     viz: `<div style="display:flex;gap:18px;align-items:center;font:14px var(--sans);color:var(--ink2)"><div style="padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.05);max-width:230px">“I'm an AI assistant, so I don't have days, but I'd love to hear about yours!”</div><div style="padding:12px 14px;border-radius:12px;background:rgba(80,30,90,.35);max-width:230px;font-family:var(--serif);color:var(--ink)">“It was terrible. The bus broke down and I missed my exam…”</div></div>`,
   },
 ];

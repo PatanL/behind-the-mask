@@ -63,14 +63,14 @@ export function cardImage({ question, answer, emotion, level, faceCanvas }) {
   ctx.shadowBlur = 0;
   ctx.font = '28px Inter, system-ui, sans-serif'; ctx.fillStyle = '#6b7290';
   ctx.fillText('An AI with a feeling turned up inside it, by editing its hidden state.', 72, H - 96);
-  ctx.fillText('Qwen3.5-9B · activation steering · not evidence of real feelings', 72, H - 56);
+  ctx.fillText('Steer AI · activation steering · not evidence of real feelings', 72, H - 56);
   return c;
 }
 
 export async function shareCard(opts, link) {
   const canvas = cardImage(opts);
   const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-  const file = new File([blob], 'behind-the-mask.png', { type: 'image/png' });
+  const file = new File([blob], 'steer-ai.png', { type: 'image/png' });
   try {
     if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], text: `“${opts.question}”, ${link}`, url: link }); return 'shared'; }
   } catch { /* fall through to the preview */ }

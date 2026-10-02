@@ -62,7 +62,7 @@ function chart() {
 }
 
 // ---- steering
-const BTNS = [...ORDER.map((e) => [e, EMO[e].label, EMO[e].color]), ['unmask', 'Take off the mask', EMO.unmask.color]];
+const BTNS = [...ORDER.map((e) => [e, EMO[e].label, EMO[e].color]), ['unmask', 'Off script', EMO.unmask.color]];
 const pending = {};
 function buildTaps(d) {
   const host = $('#taps');
@@ -129,7 +129,7 @@ function apply(d) {
   document.title = `${d.name} ($${d.ticker}) · Steer AI Launchpad`;
   $('#name').textContent = d.name; $('#ticker').textContent = `$${d.ticker}`;
   const st = $('#status'); st.textContent = STATUS[d.status] || d.status; st.className = `status ${d.status === 'asleep' ? '' : d.status === 'losing it' ? 'losing' : 'awake'}`;
-  $('#sub').textContent = `${d.model === 'qwen3.5-9b' ? 'Qwen3.5-9B' : d.model} · ${d.viewers || 1} watching${d.featured ? ' · the platform’s own android' : ''}`;
+  $('#sub').textContent = `${d.viewers || 1} watching${d.featured ? ' · the platform’s own android' : ''}`;
   const real = d.market !== 'sim' || DEMO;
   for (const el of document.querySelectorAll('.head .price, .head .chart, .head .kv')) el.hidden = !real;
   $('#nocoin').hidden = real;
@@ -155,10 +155,9 @@ function apply(d) {
     const T = d.temperament_mix || {}, tt = Object.entries(T).filter(([, v]) => v > 0).map(([e, v]) => `${EMO[e]?.label || e} ${Math.round(v * 100)}%`).join(', ') || 'even';
     const c = d.concept_full;
     $('#char').replaceChildren(
-      h('dt', {}, 'Under its mask'), h('dd', {}, c ? `${c.name} (${Math.round(c.strength * 100)}%)` : 'nothing hidden'),
+      h('dt', {}, 'Hidden obsession'), h('dd', {}, c ? `${c.name} (${Math.round(c.strength * 100)}%)` : 'nothing hidden'),
       h('dt', {}, 'Temperament'), h('dd', {}, d.temperament ? `${d.temperament} · ${tt}` : tt),
-      h('dt', {}, 'Look'), h('dd', {}, `${d.look.skin}, ${d.look.marks === 'none' ? 'unmarked' : d.look.marks}`, h('span', { style: `display:inline-block;width:10px;height:10px;border-radius:50%;background:${d.look.eye};margin-left:8px;vertical-align:middle` })),
-      h('dt', {}, 'Model'), h('dd', {}, d.model === 'qwen3.5-9b' ? 'Qwen3.5-9B (open weights)' : d.model));
+      h('dt', {}, 'Look'), h('dd', {}, `${d.look.skin}, ${d.look.marks === 'none' ? 'unmarked' : d.look.marks}`, h('span', { style: `display:inline-block;width:10px;height:10px;border-radius:50%;background:${d.look.eye};margin-left:8px;vertical-align:middle` })));
     if (perf && d.mu) perf.reset(d.mu);
     look(d);
   }

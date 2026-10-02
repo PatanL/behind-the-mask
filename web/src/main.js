@@ -69,7 +69,7 @@ function buildControls() {
   const feel = (key, cls = '') => {
     const b = document.createElement('button');
     b.className = `orb ${cls}`; b.dataset.e = key; b.style.setProperty('--c', EMO[key].color);
-    b.innerHTML = `<span class="ball"></span><span>${key === 'unmask' ? 'Unmask' : key === 'swing' ? 'Swing' : EMO[key].label}</span>`;
+    b.innerHTML = `<span class="ball"></span><span>${key === 'unmask' ? 'Off script' : key === 'swing' ? 'Swing' : EMO[key].label}</span>`;
     b.title = EMO[key].label;
     b.onclick = () => { touch(); stage.face.react('listen'); state.emotion = key; if (key === 'none' || key === 'swing') state.level = key; else if (!['little', 'mid1', 'lot', 'mid2', 'toomuch'].includes(state.level)) state.level = 'lot'; refresh(); };
     fs.appendChild(b);

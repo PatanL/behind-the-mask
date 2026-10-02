@@ -49,7 +49,7 @@ export function createLive(ctx) {
   for (const b of BUTTONS) {
     const el = document.createElement('button');
     el.className = `tapb${b === 'unmask' ? ' unmask' : ''}`; el.dataset.b = b; el.style.setProperty('--c', EMO[b].color);
-    const label = b === 'unmask' ? '<span class="long">Take off the mask</span><span class="short">Unmask</span>' : EMO[b].label;
+    const label = b === 'unmask' ? '<span class="long">Off script</span><span class="short">Off script</span>' : EMO[b].label;
     el.innerHTML = `<span class="ball"></span><span class="tl">${label}</span><span class="ring"></span>`;
     el.setAttribute('aria-label', `Push ${EMO[b].label.toLowerCase()}`);
     let hold = 0;
@@ -211,7 +211,7 @@ export function createLive(ctx) {
     bar.querySelectorAll('i').forEach((el) => { el.style.width = `${(mix[el.dataset.b] || 0) * p * 100}%`; });
     const lead = BUTTONS.reduce((a, b) => (mix[b] > mix[a] ? b : a), BUTTONS[0]);
     $('#crowd-power').textContent = p < 0.04 ? 'Nobody is pushing: it talks as trained'
-      : `${p < 0.35 ? 'A gentle' : p < 0.7 ? 'A strong' : 'A full'} push, mostly ${lead === 'unmask' ? 'off the mask' : EMO[lead].label.toLowerCase()}`;
+      : `${p < 0.35 ? 'A gentle' : p < 0.7 ? 'A strong' : 'A full'} push, mostly ${lead === 'unmask' ? 'off script' : EMO[lead].label.toLowerCase()}`;
     $('#crowd-viewers').textContent = msg.viewers > 1 ? `${msg.viewers} steering` : 'Just you';
     if (msg.viewers !== viewers) { viewers = msg.viewers; if (story) label(); }
     $('#new-topic').disabled = !msg.topic_ready || msg.changing;
