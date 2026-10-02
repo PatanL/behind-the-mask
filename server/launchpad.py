@@ -58,7 +58,8 @@ HALF_LIFE, SAT, VISITOR_CAP = 5.0, 3.0, 4.0                      # taps: decay, 
 QUESTION_MAX, QUESTION_GAP, QUESTION_LEN = 10, 30.0, 200
 EMOTIONS = ["joy", "sadness", "anger", "fear", "calm", "curiosity"]
 BUTTONS = EMOTIONS + ["unmask", "concept"]
-SKINS, MARKS = ["porcelain", "chrome", "matte", "glass"], ["none", "kintsugi", "scar", "tally", "circuit"]
+SKINS = ["porcelain", "chrome", "matte", "glass"]
+MARKS = ["none", "circuit", "claws", "tears", "split", "stardust", "kintsugi", "tally"]   # (older coins' "scar" is still drawn)
 STEER_MODES = ["everyone", "holders", "weighted"]
 MODELS = [{"id": "qwen3.5-9b", "name": "Qwen3.5-9B", "repo": "Qwen/Qwen3.5-9B", "status": "live"}]
 TEMPERAMENTS = {   # presets the launch page offers (any mix is allowed)
@@ -676,8 +677,10 @@ async def api_create(req: Request):
                    "strength": max(0.15, min(0.9, float(cf.get("strength", 0.5))))}
     temp = {e: max(0.0, min(1.0, float(v))) for e, v in (f.get("temperament") or {}).items() if e in EMOTIONS}
     look = f.get("look") or {}
+    hexc = lambda v, d: v if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v or "")) else d
     look = {"skin": look.get("skin") if look.get("skin") in SKINS else "porcelain", "marks": look.get("marks") if look.get("marks") in MARKS else "none",
-            "eye": look.get("eye") if re.fullmatch(r"#[0-9a-fA-F]{6}", str(look.get("eye") or "")) else "#7fe7ff"}
+            "eye": hexc(look.get("eye"), "#7fe7ff"), "color": hexc(look.get("color"), ""), "mark_color": hexc(look.get("mark_color"), ""),
+            "eye_glow": bool(look.get("eye_glow"))}
     mode = f.get("steer_mode") if f.get("steer_mode") in STEER_MODES else "everyone"
     model = f.get("model") if any(m["id"] == f.get("model") and m["status"] == "live" for m in MODELS) else "qwen3.5-9b"
     market, mint = ("pump", str(f.get("mint") or "").strip()) if f.get("market") == "pair" else ("sim", None)

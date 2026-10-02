@@ -36,8 +36,11 @@
       </fieldset>
       <fieldset class="fs">
         <legend>Look</legend>
-        <div class="looks"><div class="chips" id="skins"></div><label class="eye">Eyes <input type="color" name="eye" value="#7fe7ff" /></label></div>
-        <div class="chips" id="marks"></div>
+        <div class="look-row"><span class="lk">Skin</span><div class="chips" id="skins"></div></div>
+        <div class="look-row"><span class="lk">Skin colour</span><div class="swatches" id="skin-colors"></div></div>
+        <div class="look-row"><span class="lk">Eyes</span><div class="swatches" id="eye-colors"></div><button type="button" class="chip" id="eye-glow" aria-pressed="false">Glowing</button></div>
+        <div class="look-row"><span class="lk">Marks</span><div class="chips" id="marks"></div></div>
+        <div class="look-row" id="mark-color-row" hidden><span class="lk">Mark colour</span><div class="swatches" id="mark-colors"></div></div>
       </fieldset>
       <fieldset class="fs coin-fs">
         <legend>The coin</legend>

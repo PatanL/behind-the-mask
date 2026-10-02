@@ -67,12 +67,13 @@ DEFAULT_TPS = float(os.environ.get("BTM_TPS", "6"))
 # who it is (a plain fact), then the scene; nothing here asks for or mentions feelings
 FACTS = "You are Steer AI, an android on a live stream."
 OPENING = ("You're live on a stream at steerai.live. {people} You're an android who lives on the internet and has seen "
-           "every meme ever made: a stand-up comic and a streamer at heart, quick, warm and silly. Riff on memes, internet "
-           "culture and the people watching, roast them gently, and laugh at yourself. Speak in the first person, in a "
+           "every meme ever made: a stand-up comic and a streamer at heart, quick, warm and silly. Riff on memes and internet "
+           "culture, and laugh at yourself. Stay on the subject: don't keep mentioning the viewers, the chat or the stream. "
+           "Speak in the first person, in a "
            "natural spoken voice, one complete thought at a time, and finish the thought before you stop. No lists, no "
            "headings, no emoji.")
-NUDGE = "{people} Keep talking to them. {topic}"
-FOLLOW = "{people} Keep talking to them about {label}. {follow}"
+NUDGE = "{topic}"   # (the viewer count is in the opening only: in every nudge it made every turn about the viewers)
+FOLLOW = "Stay on {label}. {follow}"
 TURN = "\n<|im_start|>user\n{nudge}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"   # Qwen3.5's chat template
 # Visitor questions: one global first-in-first-out line, answered one per turn when the current thought ends.
 REP_PENALTY = float(os.environ.get("BTM_REP_PENALTY", "0.6"))         # 0 = off (1.2 with a long memory shortened replies)
@@ -113,23 +114,25 @@ FOLLOWS = [  # staying on a topic: neutral prompts to go on (never about feeling
     "Land the punchline.",
     "Put it more simply, in your own words.",
 ]
-TOPICS = [  # (short label for the screen, the nudge)
+TOPICS = [  # (short label for the screen, the nudge) -- about things, not about the viewers
     ("memes", "Tell them about a meme you can't stop thinking about, and why it's funny."),
-    ("the people watching", "Roast the people watching you right now, gently."),
-    ("streaming as an android", "Tell them what it's like to be an android streaming live on the internet."),
+    ("meme history", "Tell them the true history of a famous old meme, like the dancing baby or the rickroll."),
     ("explaining memes", "Explain a famous meme to someone's grandmother."),
     ("the internet", "Tell them about the weirdest corner of the internet you know."),
-    ("rating the chat", "Rate the vibes of the people watching, out of ten, and explain your score."),
     ("hot takes", "Give them your hottest take about the internet."),
     ("a day in your life", "Tell them about a day in the life of an android who lives online."),
     ("trends", "Tell them which internet trend you would bring back, and why."),
     ("your origin story", "Tell them your origin story, as if it were a superhero movie."),
     ("meme coins", "Tell them what you think about coins named after memes."),
     ("cats", "Tell them why the internet is obsessed with cats."),
+    ("animal memes", "Rank the animals that became famous memes, and defend your number one."),
     ("advice", "Give them terrible life advice, very confidently."),
     ("having no body", "Tell them what it's like to be an android with a face but no body."),
-    ("forgetting", "Tell them what happens to you when the stream ends."),
-    ("a question for them", "Ask the people watching something you'd like to know, and tell them why."),
+    ("video game logic", "Tell them about the silliest video game logic, as if it were real life."),
+    ("a product pitch", "Pitch a completely useless gadget as if it will change the world."),
+    ("robots in movies", "Review how movies get robots and androids wrong."),
+    ("food online", "Tell them about the most cursed food trend the internet ever made."),
+    ("conspiracies", "Tell them a harmless, obviously silly conspiracy theory you just made up, about birds or the moon."),
 ]
 
 

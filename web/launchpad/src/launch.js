@@ -8,14 +8,25 @@ import { launchOnPump, pumpStatus } from './pump.js';
 header('Launch'); footer();
 const form = $('#form');
 const stage = new Stage($('#face'));
-let meta = { skins: ['porcelain', 'chrome', 'matte', 'glass'], marks: ['none', 'kintsugi', 'scar', 'tally', 'circuit'], temperaments: {}, models: [] };
-const look = { skin: 'porcelain', marks: 'none', eye: '#7fe7ff' };
+let meta = { skins: ['porcelain', 'chrome', 'matte', 'glass'], marks: ['none', 'circuit', 'claws', 'tears', 'split', 'stardust', 'kintsugi', 'tally'], temperaments: {}, models: [] };
+const look = { skin: 'porcelain', marks: 'none', eye: '#7fe7ff', color: '', mark_color: '', eye_glow: false };
 // coins always launch on pump.fun; ?demo=1 (internal) makes a demo coin with a simulated market instead
 const DEMO = new URLSearchParams(location.search).has('demo');
 let temp = {}, tempName = 'even', market = DEMO ? 'sim' : 'pump';
 
 const SKIN = { porcelain: 'Porcelain', chrome: 'Chrome', matte: 'Matte black', glass: 'Glass' };
-const MARK = { none: 'No marks', kintsugi: 'Kintsugi', scar: 'Scar', tally: 'Tally marks', circuit: 'Circuit' };
+const MARK = { none: 'No marks', circuit: 'Circuit', claws: 'Claws', tears: 'Tears', split: 'Split face', stardust: 'Stardust', kintsugi: 'Kintsugi', tally: 'Tally marks' };
+// colour swatches ('' = the skin's or the mark's own colour); the last swatch is any colour
+const SKIN_COLORS = ['', '#e8dcc8', '#f2b8c6', '#e2b04a', '#d98b6f', '#59c9a5', '#3a5bd9', '#c4283c', '#b9a3f0', '#16171c'];
+const EYE_COLORS = ['#7fe7ff', '#ffb347', '#ff3b3b', '#a6ff4d', '#b57bff', '#ff5fd2', '#ffd257', '#f2f4ff'];
+const MARK_COLORS = ['', '#ff2e88', '#3df2ff', '#b6ff3d', '#ffc94a', '#ff3b30', '#a76bff', '#f4f6ff', '#0b0b0f'];
+function swatches(el, colors, cur, set) {
+  const pick = (v) => { set(v); [...el.children].forEach((b) => b.classList.toggle('on', b.dataset.v === v)); preview(); };
+  const custom = h('input', { type: 'color', value: colors.find(Boolean) || '#ffffff', 'aria-label': 'Any colour' });
+  const any = h('label', { class: 'sw any', title: 'Any colour', 'data-v': '*' }, custom);
+  custom.oninput = () => { set(custom.value); [...el.children].forEach((b) => b.classList.toggle('on', b === any)); any.style.setProperty('--c', custom.value); preview(); };
+  el.replaceChildren(...colors.map((c) => { const b = h('button', { type: 'button', class: `sw${c ? '' : ' def'}${c === cur ? ' on' : ''}`, 'data-v': c, title: c || 'Its own colour', style: c ? `--c:${c}` : null }); b.onclick = () => pick(c); return b; }), any);
+}
 const PERSONAS = [
   'A lighthouse keeper who has been alone for forty years. Gruff, poetic, a little strange.',
   'A Wall Street trader in 1987, on the morning of the crash. Fast, loud, sweating.',
@@ -49,7 +60,11 @@ function init() {
   chips($('#temps'), Object.keys(T).map((k) => [k, k[0].toUpperCase() + k.slice(1)]), tempName, (k) => { temp = { ...T[k] }; tempName = k; sliders(); preview(); });
   sliders();
   chips($('#skins'), meta.skins.map((k) => [k, SKIN[k] || k]), look.skin, (k) => { look.skin = k; preview(); });
-  chips($('#marks'), meta.marks.map((k) => [k, MARK[k] || k]), look.marks, (k) => { look.marks = k; preview(); });
+  chips($('#marks'), meta.marks.map((k) => [k, MARK[k] || k]), look.marks, (k) => { look.marks = k; $('#mark-color-row').hidden = k === 'none'; preview(); });
+  swatches($('#skin-colors'), SKIN_COLORS, look.color, (v) => { look.color = v; });
+  swatches($('#eye-colors'), EYE_COLORS, look.eye, (v) => { look.eye = v; });
+  swatches($('#mark-colors'), MARK_COLORS, look.mark_color, (v) => { look.mark_color = v; });
+  $('#eye-glow').onclick = () => { look.eye_glow = !look.eye_glow; $('#eye-glow').classList.toggle('on', look.eye_glow); $('#eye-glow').setAttribute('aria-pressed', String(look.eye_glow)); preview(); };
   $('#model').replaceChildren(...(meta.models.length ? meta.models : [{ id: 'qwen3.5-9b', name: 'Qwen3.5-9B', status: 'live' }]).map((m) => h('option', { value: m.id, disabled: m.status !== 'live' ? '' : null }, `${m.name}${m.status !== 'live' ? ' (soon)' : ''}`)));
   $('#persona-ex').replaceChildren(...PERSONAS.map((p) => { const b = h('button', { type: 'button' }, p.split('.')[0]); b.onclick = () => { form.persona.value = p; }; return b; }));
   if (DEMO) { $('#pump-note').textContent = 'Demo coin: a simulated market, for trying an android out.'; $('#go').textContent = 'Launch demo'; }
@@ -61,7 +76,6 @@ function init() {
 }
 stage.ready.then(preview);
 form.name.oninput = preview;
-form.eye.oninput = () => { look.eye = form.eye.value; preview(); };
 form.strength.oninput = () => { $('#str-v').textContent = `${form.strength.value}%`; };
 
 /** The android's portrait, square, from the live preview (the coin's image). */

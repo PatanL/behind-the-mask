@@ -20,9 +20,16 @@
 .sliders label { display: grid; grid-template-columns: 76px 1fr 34px; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink2); }
 .sliders output { color: var(--ink3); font-family: var(--mono); font-size: 12px; text-align: right; }
 input[type=range] { width: 100%; accent-color: var(--accent); }
-.looks { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.eye { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink2); }
-.eye input { width: 38px; height: 28px; border: 0; background: none; padding: 0; }
+.look-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 12px; }
+.look-row .lk { width: 96px; flex: none; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink3); }
+.swatches { display: flex; flex-wrap: wrap; gap: 7px; }
+.sw { position: relative; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.16); background: var(--c, transparent); cursor: pointer; padding: 0;
+  transition: transform 0.12s, box-shadow 0.12s; }
+.sw:hover { transform: scale(1.1); }
+.sw.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--cyan), 0 0 14px var(--c, var(--cyan)); }
+.sw.def { background: linear-gradient(135deg, transparent 46%, rgba(255, 93, 108, 0.9) 47%, rgba(255, 93, 108, 0.9) 53%, transparent 54%), rgba(255, 255, 255, 0.06); }
+.sw.any { background: var(--c, conic-gradient(#ff5d6c, #ffc857, #a6e35a, #3fe0c5, #5b8cff, #b57bff, #ff5d6c)); overflow: hidden; }
+.sw.any input { position: absolute; inset: -6px; width: 40px; height: 40px; opacity: 0; cursor: pointer; }
 .btn.big { padding: 13px 22px; font-size: 15px; justify-self: start; }
 .hint { color: var(--ink3); font-size: 12px; }
 @media (max-width: 860px) {

@@ -413,6 +413,9 @@ vec3 seamPerturb(vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir) {
 const MARKS_GLSL = /* glsl */`
 uniform float uMarks; uniform vec3 uMarkColor; uniform float uMarkGlow; uniform vec3 uEyeMid; uniform float uEyeD;
 float mSeg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
+// a slash that tapers to points at both ends (w: its half-width at the middle)
+float mSlash(vec2 p, vec2 a, vec2 b, float w) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h) - w * pow(sin(3.14159 * h), 0.6); }
+float mHash(vec2 c) { return fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453); }
 // p in eye-widths from the point between the eyes (+x: the face's left, our right; +y: up). eyes at (+-0.5, 0),
 // brows ~(+-0.5, 0.45), nose tip (0, -0.56), mouth (0, -1.15)
 float faceMarks(vec3 pos) {
@@ -430,6 +433,27 @@ float faceMarks(vec3 pos) {
   } else if (uMarks < 3.5) {   // tally marks under the left eye, struck through
     for (int i = 0; i < 4; i++) { float x = 0.34 + 0.10 * float(i); d = min(d, mSeg(p, vec2(x, -0.30), vec2(x, -0.52))); }
     d = min(d, mSeg(p, vec2(0.27, -0.49), vec2(0.73, -0.33))); w = 0.014;
+  } else if (uMarks > 5.5 && uMarks < 6.5) {   // claws: three tapered slashes down across the right eye
+    for (int i = -1; i < 2; i++) { float o = 0.17 * float(i); d = min(d, mSlash(p, vec2(-0.12 + o, 0.8), vec2(-0.76 + o, -0.8), 0.062)); }
+    w = 0.0;
+  } else if (uMarks > 6.5 && uMarks < 7.5) {   // tears: streaks running down from both eyes, each ending in a drop
+    for (int i = 0; i < 2; i++) {
+      float sx = i == 0 ? -1.0 : 1.0, x0 = 0.47 * sx;
+      vec2 q = vec2(p.x - 0.022 * sin(p.y * 10.0 + sx), p.y);
+      d = min(d, mSeg(q, vec2(x0, -0.22), vec2(x0, -1.12)) - 0.028);
+      d = min(d, length(q - vec2(x0, -1.16)) - 0.055);
+      d = min(d, mSeg(q, vec2(x0 + 0.12 * sx, -0.25), vec2(x0 + 0.12 * sx, -0.66)) - 0.02);
+      d = min(d, length(q - vec2(x0 + 0.12 * sx, -0.69)) - 0.038);
+    }
+    w = 0.0;
+  } else if (uMarks > 7.5 && uMarks < 8.5) {   // split: the right half of the head in another colour, a zigzag edge
+    d = p.x + 0.045 * (abs(fract(p.y * 2.6) - 0.5) * 4.0 - 1.0); w = 0.0; front = 1.0;
+  } else if (uMarks > 8.5 && uMarks < 9.5) {   // stardust: points of light across the nose and cheeks
+    float cell = 0.085; vec2 c = floor(p / cell), f = p / cell - c;
+    float hsh = mHash(c), r = 0.1 + 0.2 * mHash(c + 7.3) * mHash(c + 2.9);
+    vec2 ctr = 0.3 + 0.4 * vec2(mHash(c + 1.7), mHash(c + 4.1));
+    float inside = step(length(vec2(p.x / 1.15, (p.y + 0.32) / 0.36)), 1.0) * step(0.5, hsh);
+    d = inside > 0.5 ? (length(f - ctr) - r) * cell : 1e3; w = 0.0;
   } else {                     // circuit traces on the right temple
     d = min(d, mSeg(p, vec2(-1.00, 1.05), vec2(-0.62, 1.05))); d = min(d, mSeg(p, vec2(-0.62, 1.05), vec2(-0.62, 0.78)));
     d = min(d, mSeg(p, vec2(-0.98, 0.88), vec2(-0.80, 0.88))); d = min(d, mSeg(p, vec2(-0.80, 0.88), vec2(-0.80, 0.62)));
@@ -437,7 +461,7 @@ float faceMarks(vec3 pos) {
     d = min(d, length(p - vec2(-0.62, 0.78)) - 0.03); d = min(d, length(p - vec2(-0.80, 0.62)) - 0.03); d = min(d, length(p - vec2(-0.40, 0.95)) - 0.03);
     w = 0.016;
   }
-  float fw = max(fwidth(d), 1e-5);
+  float fw = clamp(fwidth(d), 1e-5, 0.02);   // (clamped: a pattern drawn cell by cell jumps at the cell edges)
   return front * (1.0 - smoothstep(w - fw, w + fw, d));
 }
 `;
@@ -964,10 +988,15 @@ export class AndroidFace {
   }
   /** The android's look: skin 'porcelain' | 'chrome' | 'matte' (matte black) | 'glass'; eye colour (CSS colour);
    *  marks 'none' | 'kintsugi' | 'scar' | 'tally' | 'circuit'. Unset fields keep their value. */
-  setLook({ skin, eye, marks } = {}) {
-    this.look = { ...(this.look || { skin: 'porcelain', eye: '#7fe7ff', marks: 'none' }), ...Object.fromEntries(Object.entries({ skin, eye, marks }).filter(([, v]) => v != null)) };
+  /** The android's look: skin (porcelain / chrome / matte / glass), eye colour, marks; optionally color (a skin colour
+   *  over the skin's own), mark_color (over the mark's own) and eye_glow (glowing eyes). Unset keys keep their value;
+   *  color / mark_color: '' for the default. */
+  setLook({ skin, eye, marks, color, mark_color, eye_glow } = {}) {
+    this.look = { ...(this.look || { skin: 'porcelain', eye: '#7fe7ff', marks: 'none', color: '', mark_color: '', eye_glow: false }),
+      ...Object.fromEntries(Object.entries({ skin, eye, marks, color, mark_color, eye_glow }).filter(([, v]) => v != null)) };
     const L = this.look, U = this.uniforms;
     if (eye) this.setIrisColor(eye);
+    this.irisGlow = L.eye_glow ? 2.6 : 1.0;
     if (!U) return;
     const SK = {
       porcelain: { color: [0.93, 0.905, 0.868], roughness: 0.4, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.075, sheen: 0.25, transmission: 0, sss: 0.55, wrap: 0.45, seamDark: 0.28 },
@@ -976,15 +1005,18 @@ export class AndroidFace {
       glass: { color: [0.62, 0.76, 0.9], roughness: 0.07, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, sheen: 0, transmission: 0, iridescence: 1, sss: 0.1, wrap: 0.3, seamDark: 0.4 },
     }[L.skin] || null;
     if (SK) for (const m of this._porcelainMats || []) {
-      m.color.setRGB(...SK.color); m.roughness = SK.roughness; m.metalness = SK.metalness; m.clearcoat = SK.clearcoat;
+      if (L.color) m.color.set(L.color); else m.color.setRGB(...SK.color);
+      m.roughness = SK.roughness; m.metalness = SK.metalness; m.clearcoat = SK.clearcoat;
       m.clearcoatRoughness = SK.clearcoatRoughness; m.sheen = SK.sheen; m.transmission = SK.transmission;
       m.iridescence = SK.iridescence || 0; m.iridescenceIOR = 1.45; m.iridescenceThicknessRange = [180, 520];   // glass: a clear, oil-sheen finish
       m.needsUpdate = true;
     }
     if (SK) { U.uSSS.value.setRGB(1.0, 0.62, 0.45).multiplyScalar(SK.sss); U.uWrap.value = SK.wrap; U.uSeamDark.value = SK.seamDark; }
-    const MK = { none: [0], kintsugi: [1, [0.86, 0.64, 0.24], 0.4], scar: [2, [0.32, 0.2, 0.2], 0], tally: [3, [0.12, 0.12, 0.14], 0], circuit: [4, [0.35, 0.85, 1.0], 2.0] }[L.marks] || [0];
+    const MK = { none: [0], kintsugi: [1, [0.86, 0.64, 0.24], 0.4], scar: [2, [0.32, 0.2, 0.2], 0], tally: [3, [0.12, 0.12, 0.14], 0], circuit: [4, [0.35, 0.85, 1.0], 2.0],
+      claws: [6, [0.9, 0.06, 0.08], 1.3], tears: [7, [0.02, 0.02, 0.03], 0], split: [8, [0.025, 0.025, 0.03], 0],
+      stardust: [9, [0.75, 0.92, 1.0], 2.4] }[L.marks] || [0];
     U.uMarks.value = MK[0];
-    if (MK[1]) { U.uMarkColor.value.setRGB(...MK[1]); U.uMarkGlow.value = MK[2]; }
+    if (MK[1]) { if (L.mark_color) U.uMarkColor.value.set(L.mark_color); else U.uMarkColor.value.setRGB(...MK[1]); U.uMarkGlow.value = MK[2]; }
   }
 
   /** 0 awake .. 1 asleep: the eyes close, breathing slows and deepens, the head sinks, the eyes' light dims. */
