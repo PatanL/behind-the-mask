@@ -165,12 +165,14 @@ function apply(m) {
   $('#lately').replaceChildren(h('span', { class: 'lbl' }, 'awake now'), ...lately.map((c) => h('span', {}, h('b', {}, `$${c.ticker}`), ` ${pct(c.change_5m)} · ${(STATUS[c.status] || c.status).toLowerCase()}`)));
   render();
 }
-get(`api/coins${DEMO ? '?demo=1' : ''}`).then(apply).catch(() => { $('#stats').replaceChildren(h('div', {}, h('b', {}, 'offline'), h('span', {}, 'the androids are resting'))); });
+// the live socket sends the full list first, then changes: no separate request
+let listed = false;
+setTimeout(() => { if (!listed) $('#stats').replaceChildren(h('div', {}, h('b', {}, 'offline'), h('span', {}, 'the androids are resting'))); }, 6000);
 function connect() {
   const ws = new WebSocket(`${wsUrl('api/ws/explore')}${DEMO ? '?demo=1' : ''}`);
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.type === 'coins') apply(m);
+    if (m.type === 'coins') { listed = true; apply(m); }
     else if (m.type === 'delta') {   // only what changed since the last update (absolute values)
       const by = new Map(coins.map((c) => [c.id, c]));
       for (const d of m.c) { const c = by.get(d.id); if (c) by.set(d.id, { ...c, ...d }); }
