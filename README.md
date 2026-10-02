@@ -4,7 +4,7 @@ Live at https://steerai.live
 
 **Every coin has a live android.** Steer AI is a live android you can steer from the inside, and a launchpad where
 every coin gets one of its own. Launch a coin on pump.fun and give it an android: a character, something hidden under
-its mask, a temperament and a face. Its trading keeps it awake, and its chart is its mood.
+its mask, a temperament and a face. Its trading keeps it awake.
 
 - **A live android, steered from the inside.** Its words and its face come from an open-weight model (Qwen3.5-9B).
   Visitors' taps push the model's hidden state along feeling directions while it talks; the face is driven by what the
@@ -13,7 +13,7 @@ its mask, a temperament and a face. Its trading keeps it awake, and its chart is
   a steering direction inside the model the way the feelings are (contrastive activation: the same neutral texts read
   with and without the concept), always pushing a little. A temperament (feelings it drifts back to). A look
   (porcelain, chrome, matte black or glass; eye colour; marks). Advanced: the model, and whether holders steer it.
-- **The chart is its mood.** Rising prices push joy, falling ones fear, a big sell anger, a flat quiet chart calm.
+- **Its coin's news.** A sharp price move is told to it as news (its chart doesn't push its feelings).
 - **Asleep and awake.** Its coin's trading volume pays for its compute time; unfunded, it falls asleep (eyes shut,
   slow breathing) and a trade wakes it with a start.
 - **One model, many androids.** All awake androids share one model on one GPU: each is a row of a shared batch fed
@@ -23,7 +23,7 @@ its mask, a temperament and a face. Its trading keeps it awake, and its chart is
 |---|---|
 | `server/launchpad.py` | the launchpad server: coins, androids, steering mixes, questions, funding, the API (`/api`) |
 | `server/multimind.py` | many androids on one model (a shared batch, one token per row per step) |
-| `server/lp_concepts.py`, `lp_market.py`, `lp_pump.py`, `lp_wallet.py`, `lp_moderate.py` | concept directions; the chart as mood; pump.fun trades and launching; holders; moderation |
+| `server/lp_concepts.py`, `lp_market.py`, `lp_pump.py`, `lp_wallet.py`, `lp_moderate.py` | concept directions; markets; pump.fun trades and launching; holders; moderation |
 | `web/launchpad/` | the site: the live android (`index.html`), explore, launch, an android's page, docs |
 | `web/src/face/` | the android face (looks, sleep and startle: `setLook`, `setSleep`, `startle`) |
 

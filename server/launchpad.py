@@ -9,7 +9,7 @@ out it falls asleep, and a trade wakes it.
 
 All awake androids share one model (multimind.MultiMind: one row each, one token per row per step). Each android's
 push is mixed every half second from
-    its temperament  +  the chart (its coin's market as feelings, lp_market.mood)
+    its temperament
     +  the crowd's taps (everyone, holders only, or holders weighted by holdings: the creator's choice)
     +  its concept (always on, at the creator's strength)
 Visitors can also ask it questions (one global line per coin).
@@ -45,7 +45,7 @@ import lp_wallet
 STATE = Path(os.environ.get("LP_STATE", "runs/launchpad"))
 DIRS = Path(os.environ.get("BTM_DIRS", "runs/q9b"))
 CHAT = os.environ.get("BTM_CHAT", "Qwen/Qwen3.5-9B")
-MAX_ALIVE = int(os.environ.get("LP_MAX_ALIVE", "100"))  # funded androids alive at once (face awake, chart as mood); pump.json "max_alive"
+MAX_ALIVE = int(os.environ.get("LP_MAX_ALIVE", "100"))  # funded androids alive at once (face awake); pump.json "max_alive"
 SLOTS = int(os.environ.get("LP_SLOTS", "12"))           # of them, speaking at once to start with; adapts (slot_cap); pump.json "slots"
 PUSH_BUDGET = float(os.environ.get("LP_PUSH_BUDGET", "0.75"))
 # trading keeps an android awake: its coin's volume credits compute at the creator-fee rate (the platform pays the GPU)
@@ -207,10 +207,7 @@ class Coin:
         for e, w in (self.d.get("temperament") or {}).items():
             if e in steer:
                 steer[e] += float(w) * lv(e, "little", 0.3)
-        # its chart is its mood -- once it has a real coin (or a demo market); before that, temperament and the crowd
-        mood = self.market.mood() if (self.market.kind != "sim" or not self.d.get("featured")) else {}
-        for e, m in mood.items():
-            steer[e] += m * lv(e, "mid1", 0.4)
+        # (its chart doesn't push it: the owner's call -- it hears about big price moves as news instead, see next_turn)
         crowd = self.crowd_mix()
         for e in EMOTIONS:
             steer[e] += crowd[e] * lv(e, "lot", 0.5)
@@ -254,7 +251,7 @@ def load_coins():
         COINS[flagship["id"]] = Coin(flagship)
         COINS[flagship["id"]].save()
     f = next((c for c in COINS.values() if c.d.get("featured")), None)
-    if f and FLAGSHIP_MINT and f.d.get("mint") != FLAGSHIP_MINT:   # its real coin: from now on its chart is its mood
+    if f and FLAGSHIP_MINT and f.d.get("mint") != FLAGSHIP_MINT:   # its real coin
         f.d.update(mint=FLAGSHIP_MINT, market="pump")
         f.d.pop("market_state", None)
         COINS[f.id] = Coin(f.d)
@@ -342,8 +339,8 @@ def prompt_ids(c: Coin, nudge: str, history: list | None = None) -> list[int]:
     return chat.tokenizer(s, add_special_tokens=False)["input_ids"]
 
 
-# An android is alive while its coin is funded (up to MAX_ALIVE of them): its face is awake, its chart is its mood, a
-# trade startles it. Of those, the ones with a speaking slot talk: a row in the shared model's batch. Watched androids
+# An android is alive while its coin is funded (up to MAX_ALIVE of them): its face is awake, a trade startles
+# it. Of those, the ones with a speaking slot talk: a row in the shared model's batch. Watched androids
 # (someone on their page) get slots first; the rest take turns, one thought each, while there are more than slots.
 # With few coins every alive android has a slot and talks all the time.
 
@@ -675,7 +672,7 @@ def coin_state(c: Coin, cid: str | None = None) -> dict:
     s = c.summary()
     mix = c.crowd_mix()
     s.update(type="state", mix={b: round(v, 3) for b, v in mix.items()}, steer={k: round(v, 3) for k, v in c.steer.items() if k in EMOTIONS},
-             mood={k: round(v, 3) for k, v in c.market.mood().items()}, qn=len(c.questions), qs=[q["q"][:90] for q in c.questions[:3]],
+             qn=len(c.questions), qs=[q["q"][:90] for q in c.questions[:3]],
              qids=[q["id"] for q in c.questions], asking=c.asking["q"] if c.asking else None, asking_id=c.asking["id"] if c.asking else None,
              persona=c.d["persona"], steer_mode=c.d.get("steer_mode"), concept_full=c.d.get("concept"), temperament_mix=c.d.get("temperament"),
              balance_sol=round(c.balance(), 6), fees_sol=round(c.market.fees_sol, 6))

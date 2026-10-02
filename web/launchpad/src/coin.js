@@ -147,9 +147,7 @@ function apply(d) {
   const mix = d.mix || {};
   const tot = Object.values(mix).reduce((a, b) => a + b, 0) || 1;
   [...$('#mix').children].forEach((i) => { i.style.width = `${((mix[i.dataset.b] || 0) / Math.max(1, tot)) * 100}%`; });
-  const mood = d.mood || {}, strong = Object.entries(mood).filter(([, v]) => v > 0.2).sort((a, b) => b[1] - a[1]);
-  $('#why').textContent = !real ? 'Its coin hasn’t launched yet: its temperament and your taps set its mood.'
-    : strong.length ? `Its chart is pushing ${strong.map(([e]) => EMO[e].label.toLowerCase()).join(' and ')}, on top of its temperament and everyone's taps.` : 'Its chart is quiet: its temperament and your taps set its mood.';
+  $('#why').textContent = 'Its temperament and everyone’s taps set its mood.';
   if (first) {
     $('#persona').textContent = d.persona;
     const T = d.temperament_mix || {}, tt = Object.entries(T).filter(([, v]) => v > 0).map(([e, v]) => `${EMO[e]?.label || e} ${Math.round(v * 100)}%`).join(', ') || 'even';
