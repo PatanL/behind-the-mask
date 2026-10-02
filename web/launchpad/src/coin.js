@@ -80,14 +80,14 @@ function chart() {
 }
 
 // ---- steering
-const BTNS = [...ORDER.map((e) => [e, EMO[e].label, EMO[e].color]), ['unmask', 'Off script', EMO.unmask.color]];
+const BTNS = ORDER.map((e) => [e, EMO[e].label, EMO[e].color]);   // the six feelings; its hidden obsession is the extra button (no Off script here)
 const pending = {};
 function buildTaps(d) {
   const host = $('#taps');
   if (host.childElementCount) return;
   const all = d.concept ? [...BTNS, ['concept', `More ${d.concept}`, '#9fb4ff']] : BTNS;
   for (const [b, label, color] of all) {
-    const el = h('button', { class: `tapb${b === 'unmask' || b === 'concept' ? ' wide' : ''}`, 'data-b': b, style: `--c:${color}` }, label);
+    const el = h('button', { class: `tapb${b === 'concept' ? ' wide' : ''}`, 'data-b': b, style: `--c:${color}` }, label);
     el.onpointerdown = (e) => { e.preventDefault(); pending[b] = (pending[b] || 0) + 1; el.style.setProperty('--heat', '1'); setTimeout(() => el.style.setProperty('--heat', '0'), 220); };
     host.append(el);
   }
