@@ -46,7 +46,7 @@ VOLUME_CREDIT = os.environ.get("LP_VOLUME_CREDIT", "1") == "1"
 FLAGSHIP_MINT = os.environ.get("LP_FLAGSHIP_MINT", "").strip()            # the platform android's own coin, once launched
 LAUNCHES_PER_HOUR = int(os.environ.get("LP_LAUNCHES_PER_HOUR", "30"))    # across the site
 LAUNCHES_PER_SOURCE = int(os.environ.get("LP_LAUNCHES_PER_SOURCE", "3"))  # per wallet / address per hour
-MODERATION = os.environ.get("LP_MODERATION", "1") == "1"
+MODERATION = os.environ.get("LP_MODERATION", "0") == "1"   # off: the owner decided against screening characters (lp_moderate.py: =1 to turn on)
 # demo coins (a simulated market, for trying an android out) only from the private test site / this machine
 DEMO_ORIGINS = [o for o in os.environ.get("LP_DEMO_ORIGINS", "http://100.97.32.64:4360,http://127.0.0.1:5197,http://127.0.0.1:4361").split(",") if o]  # the whole steering mix, at most (units of residual norm)            # androids talking at once on this machine
 STEP_RATE = float(os.environ.get("LP_STEP_RATE", "6"))           # tokens per second per android (at most)

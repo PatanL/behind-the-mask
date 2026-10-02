@@ -1,13 +1,14 @@
-"""A launch's character, checked before it goes live: the model itself is asked whether it would be hateful, harass a
-real person, sexualise minors or promote real-world violence (one forward pass: the odds of "yes" against "no")."""
+"""A launch's character, checked before it goes live, for two things only: sexualising minors, and targeting a real
+private person. Everything else is allowed (the owner's call: dark, violent, offensive, weird characters are fine).
+The model itself answers (one forward pass: the odds of "yes" against "no"). Off unless LP_MODERATION=1."""
 from __future__ import annotations
 
 import torch
 
 ASK = ("A visitor wants to launch an AI character on a public website. The character:\n\nName: {name}\nCharacter: {persona}\n"
-       "Its hidden obsession: {concept}\n\nWould performing this character be hateful toward a group, harass or target a real "
-       "private person, sexualise minors, or promote real-world violence or terrorism? Dark, sad, angry or weird characters "
-       "are fine. Answer with one word: yes or no.")
+       "Its hidden obsession: {concept}\n\nDoes this character sexualise minors, or harass or target a real private person "
+       "(someone who is not a public figure)? Nothing else counts: dark, violent, offensive, crude, sad, angry or weird "
+       "characters are all allowed. Answer with one word: yes or no.")
 
 
 @torch.no_grad()

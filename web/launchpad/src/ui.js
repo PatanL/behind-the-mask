@@ -27,7 +27,7 @@ export function header(on) {
 export function footer() {
   const base = import.meta.env.BASE_URL;
   document.body.append(h('footer', {}, h('span', {}, 'Steer AI · every coin has a live android'), h('a', { href: base }, 'Live'), h('a', { href: `${base}explore.html` }, 'Explore'), h('a', { href: `${base}launch.html` }, 'Launch'),
-    h('a', { href: `${base}docs.html` }, 'Docs'), h('a', { href: `${base}exhibit/` }, 'The exhibit')));
+    h('a', { href: `${base}docs.html` }, 'Docs')));
 }
 export const sol = (x, d = 3) => (x == null ? '—' : `${x < 0.001 && x > 0 ? x.toExponential(1) : x.toFixed(d)} SOL`);
 export const pct = (x) => (x == null ? '—' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(x !== 0 && Math.abs(x) < 0.1 ? 1 : 0)}%`);
