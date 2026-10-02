@@ -3,14 +3,53 @@ import './style.css';
 import { get, wsUrl, imgUrl } from './api.js';
 import { $, h, header, footer, sol, pct, left, feelBar, STATUS } from './ui.js';
 import { FaceWall } from './faces.js';
-import { faceFrom } from './feel.js';
-import { ORDER } from '../../src/palette.js';
+import { faceFrom, Performer } from './feel.js';
+import { ORDER, EMO } from '../../src/palette.js';
 
 header('Explore'); footer();
 const DEMO = new URLSearchParams(location.search).has('demo');
 const wall = new FaceWall();
 let coins = [], sort = localStorage.getItem('lp-sort') || 'new', filter = 'all';
 const cards = new Map();   // id -> {el, slot, lift, lastLine}
+
+// ---- $STEER at the top: the home page's android, live (a light feed of its words and readouts)
+const sx = { slot: wall.attach($('#sx-box'), { look: { skin: 'porcelain', eye: '#7fe7ff' }, seed: 11 }), perf: null, words: [], queue: [], timer: 0, plain: [], L: null };
+sx.slot.face.ready.then(() => { sx.perf = new Performer(sx.slot.face); });
+// the readout's label order (the live server's; the same as the ready-made answers' index)
+fetch(`${import.meta.env.BASE_URL}performances/index.json`).then((r) => r.json()).then((j) => { sx.L = j.labels; }).catch(() => {});
+const inOrder = (v) => ORDER.map((e) => { const k = sx.L ? sx.L.indexOf(e) : ORDER.indexOf(e); return k >= 0 ? v?.[k] ?? 0 : 0; });
+function sxWord(w) {
+  // like the home page: its readout over the turn's unpushed baseline (the mean of b so far)
+  if (w.b) sx.plain.push(inOrder(w.b));
+  const n = sx.plain.length, mu = ORDER.map((_, k) => (n ? sx.plain.reduce((a, x) => a + x[k], 0) / n : 0));
+  let shown = null;
+  if (sx.perf && w.e) { sx.perf.mu = mu; shown = sx.perf.word({ t: w.t, e: inOrder(w.e) }); }
+  sx.words.push(w.t); if (sx.words.length > 60) sx.words.splice(0, sx.words.length - 60);
+  $('#sx-say').replaceChildren(h('span', {}, sx.words.join('').trim()));   // the newest words at the bottom, older ones fade out above
+  if (shown) {
+    feelBar($('#sx-feel'), shown);
+    const top = ORDER.reduce((a, k) => (shown[k] > (shown[a] || 0) ? k : a), ORDER[0]);
+    $('#sx-feel-l').textContent = shown[top] > 0.15 ? `feeling ${EMO[top].label.toLowerCase()}` : 'even';
+  }
+}
+function sxPlay() {   // the light feed arrives in batches: say them at speaking pace
+  if (sx.timer) return;
+  const step = () => { const w = sx.queue.shift(); if (!w) { sx.timer = 0; return; } sxWord(w); sx.timer = setTimeout(step, Math.min(260, 2400 / Math.max(6, sx.queue.length))); };
+  step();
+}
+function sxLive() {
+  let ws;
+  try { ws = new WebSocket(`${wsUrl('live/ws')}?cid=x-${Math.random().toString(36).slice(2, 10)}&lite=1`); } catch { return; }
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'live_begin') { sx.words = []; sx.queue = []; sx.plain = []; $('#sx-say').textContent = ''; $('#sx-status').textContent = 'Live'; }
+    else if (m.type === 'ws' || m.type === 'wc') { sx.queue.push(...m.w); sxPlay(); }
+    else if (m.type === 'crowd') $('#sx-meta').textContent = `${m.viewers} watching${m.power > 0.05 ? ` · being pushed ${Math.round(m.power * 100)}%` : ''}`;
+    else if (m.type === 'full') $('#sx-status').textContent = 'Busy';
+  };
+  ws.onclose = () => setTimeout(sxLive, 5000);
+}
+sxLive();
 
 const SORTS = [['new', 'Newest'], ['mcap', 'Market cap'], ['emotional', 'Most emotional'], ['volume', 'Volume']];
 $('#sorts').append(...SORTS.map(([k, t]) => h('button', { class: `chip${k === sort ? ' on' : ''}`, 'data-k': k }, t)));

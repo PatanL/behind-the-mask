@@ -3,17 +3,20 @@
 // and links to popular ones that aren't installed. The last one used reconnects silently on the next visit.
 import { getWallets } from '@wallet-standard/app';
 import './wallet.css';
+import { WALLET_ICONS as ICON } from './wallet-icons.js';
 
 const CHAIN = 'solana:mainnet';
 const KEY = 'steer.wallet';
 const POPULAR = [   // shown with an install link when missing
-  { name: 'Phantom', url: 'https://phantom.com/download', tint: '#ab9ff2' },
-  { name: 'Solflare', url: 'https://solflare.com/download', tint: '#ffd24a' },
-  { name: 'Backpack', url: 'https://backpack.app/downloads', tint: '#e33e3f' },
-  { name: 'Trust Wallet', url: 'https://trustwallet.com/browser-extension', tint: '#3375bb' },
-  { name: 'MetaMask', url: 'https://metamask.io/download', tint: '#f6851b' },
-  { name: 'Coinbase Wallet', url: 'https://www.coinbase.com/wallet/downloads', tint: '#0052ff' },
+  { name: 'Phantom', url: 'https://phantom.com/download', icon: ICON.phantom, app: (u, ref) => `https://phantom.app/ul/browse/${u}?ref=${ref}` },
+  { name: 'Solflare', url: 'https://solflare.com/download', icon: ICON.solflare, app: (u, ref) => `https://solflare.com/ul/v1/browse/${u}?ref=${ref}` },
+  { name: 'Backpack', url: 'https://backpack.app/downloads', icon: ICON.backpack },
+  { name: 'Trust Wallet', url: 'https://trustwallet.com/browser-extension', icon: ICON.trust },
+  { name: 'MetaMask', url: 'https://metamask.io/download', icon: ICON.metamask },
+  { name: 'Coinbase Wallet', url: 'https://www.coinbase.com/wallet/downloads', icon: ICON.coinbase },
 ];
+// a phone has no wallet extensions: these wallets can open this page inside their app instead, where the wallet works
+const PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const listeners = new Set();
 export let address = null;
 let active = null, unwatch = null;
@@ -63,7 +66,7 @@ function standard(w) {
 // Phantom's own provider, for an old Phantom that doesn't register with the Wallet Standard
 function legacyPhantom(p) {
   return {
-    name: 'Phantom', icon: null,
+    name: 'Phantom', icon: ICON.phantom,
     async connect(silent) { const { publicKey } = await p.connect(silent ? { onlyIfTrusted: true } : undefined); return publicKey.toString(); },
     async disconnect() { await p.disconnect(); },
     async signMessage(bytes) { return (await p.signMessage(bytes, 'utf8')).signature; },
@@ -104,9 +107,9 @@ export async function disconnect() {
 
 // ---- the picker
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
-function tile(h, tint) {
+function tile(h) {
   const t = el('span', 'wl-ico');
-  if (h?.icon) { const i = el('img'); i.src = h.icon; i.alt = ''; t.append(i); } else { t.textContent = (h?.name || '?')[0]; t.style.background = tint || '#1b2638'; }
+  if (h?.icon) { const i = el('img'); i.src = h.icon; i.alt = ''; t.append(i); } else { t.textContent = (h?.name || '?')[0]; t.style.background = '#1b2638'; }
   return t;
 }
 
@@ -151,8 +154,10 @@ export function pick() {
     const missing = POPULAR.filter((p) => !have.some((h) => h.name.toLowerCase().startsWith(p.name.toLowerCase().split(' ')[0])));
     if (missing.length) list.append(el('div', 'wl-sec', have.length ? 'More wallets' : 'Get a Solana wallet'));
     for (const p of missing) {
-      const r = el('a', 'wl-row'); r.href = p.url; r.target = '_blank'; r.rel = 'noopener';
-      r.append(tile({ name: p.name }, p.tint), el('span', 'wl-n', p.name), el('span', 'wl-tag', 'Get'), el('span', 'wl-go', '↗'));
+      const inApp = PHONE && p.app;
+      const r = el('a', 'wl-row'); r.href = inApp ? p.app(encodeURIComponent(location.href), encodeURIComponent(location.origin)) : p.url;
+      if (!inApp) { r.target = '_blank'; r.rel = 'noopener'; }
+      r.append(tile(p), el('span', 'wl-n', p.name), el('span', `wl-tag${inApp ? ' ok' : ''}`, inApp ? 'Open in app' : 'Get'), el('span', 'wl-go', '↗'));
       list.append(r);
     }
   }

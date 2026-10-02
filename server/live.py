@@ -560,7 +560,8 @@ async def ws_endpoint(ws: WebSocket):
         return
     cid = (ws.query_params.get("cid") or secrets.token_hex(6))[:24]
     c = Client(ws, cid)
-    c.lite = sum(1 for x in crowd.clients.values() if not x.lite) >= MAX_FULL
+    # lite=1: a preview elsewhere on the site (the explore page's $STEER card) takes the lighter stream
+    c.lite = ws.query_params.get("lite") == "1" or sum(1 for x in crowd.clients.values() if not x.lite) >= MAX_FULL
     old = crowd.clients.get(cid)
     if old:
         old.dead = True
