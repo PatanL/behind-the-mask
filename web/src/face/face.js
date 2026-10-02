@@ -1658,6 +1658,11 @@ export class AndroidFace {
       const close=smooth(0,.5,this.reliefTake.sample.eyeClose);
       this.out.eyeWideLeft*=1-close; this.out.eyeWideRight*=1-close;
     }
+    if (this.lively.v2) {   // (acting v2: sad eyes stay heavy and its outer brows down, through the quick flashes added after the springs too)
+      const [dom, v] = this._dominant(NEG);
+      const k = dom === 'sadness' ? smooth(0.15, 0.5, v) : 0;
+      if (k > 0.02) for (const sd of ['Left', 'Right']) { this.out['browOuterUp' + sd] *= 1 - 0.5 * k; this.out['eyeWide' + sd] *= 1 - 0.6 * k; }
+    }
     composeSpeech(this.out, this.speechFrame, this.speechGain);
     // blink composes with the lid state: closes whatever is open
     for (const [side, k] of [['Left', 1], ['Right', 0.97]]) {
