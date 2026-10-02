@@ -1,4 +1,4 @@
-// Launch: choose the android (character, hidden concept, temperament, look, model), then the coin.
+// Launch: choose the android (character, hidden concept, temperament, look), then the coin. (One model for now: the server's default.)
 import { get, post } from './api.js';
 import { $, h, header, footer } from './ui.js';
 import { Stage } from '../../src/stage.js';
@@ -65,7 +65,6 @@ function init() {
   swatches($('#eye-colors'), EYE_COLORS, look.eye, (v) => { look.eye = v; });
   swatches($('#mark-colors'), MARK_COLORS, look.mark_color, (v) => { look.mark_color = v; });
   $('#eye-glow').onclick = () => { look.eye_glow = !look.eye_glow; $('#eye-glow').classList.toggle('on', look.eye_glow); $('#eye-glow').setAttribute('aria-pressed', String(look.eye_glow)); preview(); };
-  $('#model').replaceChildren(...(meta.models.length ? meta.models : [{ id: 'qwen3.5-9b', name: 'Qwen3.5-9B', status: 'live' }]).map((m) => h('option', { value: m.id, disabled: m.status !== 'live' ? '' : null }, `${m.name}${m.status !== 'live' ? ' (soon)' : ''}`)));
   $('#persona-ex').replaceChildren(...PERSONAS.map((p) => { const b = h('button', { type: 'button' }, p.split('.')[0]); b.onclick = () => { form.persona.value = p; }; return b; }));
   if (DEMO) { $('#pump-note').textContent = 'Demo coin: a simulated market, for trying an android out.'; $('#go').textContent = 'Launch demo'; }
   else pumpStatus().then((st) => {
@@ -96,7 +95,7 @@ form.onsubmit = async (e) => {
     const body = {
       name: form.name.value.trim(), ticker: form.ticker.value.trim(), persona: form.persona.value.trim(),
       concept: form.concept.value.trim() ? { name: form.concept.value.trim(), examples: form.examples.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 5), strength: form.strength.value / 100 } : null,
-      temperament: temp, temperament_name: tempName, look: { ...look }, model: form.model.value, steer_mode: form.steer_mode.value, image: portrait(), market,
+      temperament: temp, temperament_name: tempName, look: { ...look }, steer_mode: form.steer_mode.value, image: portrait(), market,
     };
     body.devBuy = Number(form.dev_buy.value || 0);
     if (market === 'pump') {
