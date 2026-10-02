@@ -551,6 +551,8 @@ export class AndroidFace {
     this.duchenne = null;
     this.manualChannels = {};
     this.lively = { ...LIVELY };
+    // acting version 2 (a frame-by-frame review's changes; see _actingV2), only with ?acting=v2 in the address
+    try { if (new URLSearchParams(location.search).get('acting') === 'v2') this.lively.v2 = 1; } catch { /* (no page) */ }
     this.motionStyle = { amplitude: 1, posture: 1 };
     this.externalIntent = { x: 0, v: 0, target: 0 };
     this.writing = false;
@@ -870,6 +872,28 @@ export class AndroidFace {
    *  the lower face and covered with a polite smile, while the brows still show them and the feeling flashes
    *  across the face in brief, scripted micro-expressions. Pushed off the axis, the regulation falls away. */
   setMask(v) { if (v != null && Number.isFinite(v)) this.maskTarget = clamp(v); }
+
+  /** Acting version 2, from a frame-by-frame review of each feeling's "a lot" answer (only with ?acting=v2): when one
+   *  negative feeling leads, its face loses what contradicted it on screen -- a smile over anger and fear (the grin),
+   *  outer brows held raised in sadness and anger -- and gains its key: sadness the oblique inner brow, corners down,
+   *  chin up; anger pressed lips without the teeth-baring stretch; fear eyes held open (lids closing read as drowsy),
+   *  wide, brows up and in, lips stretched. */
+  _actingV2(tgt, felt, add) {
+    const [dom, v] = this._dominant(NEG);
+    const k = smooth(0.15, 0.5, v || 0);
+    if (!dom || k < 0.02) return;
+    scaleCh(tgt, 'mouthSmile', 1 - 0.85 * k);
+    if (dom === 'sadness') {
+      scaleCh(tgt, 'browOuterUp', 1 - 0.7 * k); scaleCh(tgt, 'eyeWide', 1 - 0.7 * k);   // (heavy, not alert, eyes)
+      add('browInnerUp', 0.3 * k); add('mouthFrown', 0.22 * k); add('mouthShrugLower', 0.14 * k); add('eyeBlink', 0.08 * k);
+    } else if (dom === 'anger') {
+      scaleCh(tgt, 'browOuterUp', 1 - 0.75 * k); scaleCh(tgt, 'mouthStretch', 1 - 0.6 * k);
+      add('mouthPress', 0.18 * k); add('browDown', 0.1 * k);
+    } else if (dom === 'fear') {
+      scaleCh(tgt, 'eyeBlink', 1 - 0.75 * k); scaleCh(tgt, 'eyeSquint', 1 - 0.6 * k);
+      add('eyeWide', 0.18 * k); add('browInnerUp', 0.18 * k); add('mouthStretch', 0.1 * k);
+    }
+  }
 
   /** Acting-lab controls. These are display/animation controls, not model measurements. */
   setNaturalFolds(enabled = true) { if(this.uniforms) this.uniforms.uNaturalFolds.value = enabled ? 1 : 0; }
@@ -1420,7 +1444,7 @@ export class AndroidFace {
     this._direct(dt, t, felt);
     // display rules: how much the trained persona is holding the face (see setMask)
     const neg = Math.max(felt.sadness, felt.anger, felt.fear, felt.disgust);
-    const R = this.reg = smooth(0.2, 0.5, this.maskS.x) * smooth(0.04, 0.25, neg);
+    const R = this.reg = smooth(0.2, 0.5, this.maskS.x) * smooth(0.04, 0.25, neg) * (this.lively.v2 ? 0.5 : 1);   // (v2: the display rule half as strong)
     // Keep one coherent onset gesture; continuous blended expression is unchanged.
     for (const [e, rise] of (this.reliefTake ? [] : onsets.sort((a,b) => b[1]-a[1]).slice(0, 1))) {
       if (e === 'relief') this._relief();
@@ -1508,6 +1532,7 @@ export class AndroidFace {
       if (this._dominant(NEG)[0] === 'anger') { add('mouthPress', 0.1 * R); add('mouthShrugLower', 0.06 * R); }   // restraint
       else { add('mouthSmileL', 0.07 * R); add('mouthSmileR', 0.05 * R); }                                       // a polite smile
     }
+    if (this.lively.v2) this._actingV2(tgt, felt, add);
     const post = {};   // fast components added after the muscle springs (micro-expressions, tremors, gasps)
     this.dbg = { tgt, post };   // diagnostics: this frame's spring targets and post-spring additions
     if (idle && this.options.micro && !this.reliefTake && R > 0.2 && neg > 0.12) {
@@ -1636,6 +1661,12 @@ export class AndroidFace {
       this.out.eyeWideLeft*=1-close; this.out.eyeWideRight*=1-close;
     }
     composeSpeech(this.out, this.speechFrame, this.speechGain);
+    if (this.lively.v2) {   // (acting v2: angry speech through tighter lips -- the speech shapes' stretch and bared teeth read as a grin)
+      const [dom, v] = this._dominant(NEG);
+      const k = dom === 'anger' ? smooth(0.15, 0.5, v) : 0;
+      if (k > 0.02) for (const [c, m] of [['mouthStretch', 0.5], ['mouthSmile', 0.6], ['mouthUpperUp', 0.35]])
+        for (const sd of ['Left', 'Right']) if (this.out[c + sd] != null) this.out[c + sd] *= 1 - m * k;
+    }
     // blink composes with the lid state: closes whatever is open
     for (const [side, k] of [['Left', 1], ['Right', 0.97]]) {
       const lid = this.out['eyeBlink' + side];
@@ -1824,7 +1855,8 @@ export class AndroidFace {
       // its own effect (the angry stare and rapt curiosity suppress blinking, fear raises it)
       let mul = 0;
       // (fearBlink > 0 replaces fear's multiplier: the actors' fear blinks ~13.5/min, more than at rest)
-      for (const e of EMOTIONS) mul += Math.log(e === 'fear' && this.lively.fearBlink > 0 ? this.lively.fearBlink : BLINK_MUL[e]) * Math.min(1, f[e]);
+      // (acting v2: fear stares -- wide eyes that keep closing read as drowsy)
+      for (const e of EMOTIONS) mul += Math.log(e === 'fear' && this.lively.v2 ? 0.55 : e === 'fear' && this.lively.fearBlink > 0 ? this.lively.fearBlink : BLINK_MUL[e]) * Math.min(1, f[e]);
       const rate = clamp(12.5 * Math.exp(mul) * (1 + 0.3 * Math.max(0, this.arousal)) * (1 - 0.25 * clamp(this.writingAmt.x)), 5, 38);
       const mean = 60 / rate;
       // log-normal-ish interval
