@@ -335,9 +335,11 @@ def job(fn):
 def prompt_ids(c: Coin, nudge: str, history: list | None = None) -> list[int]:
     chat = ENGINE["chat"]
     # the launcher's character is the prompt; the platform adds only what speaking out loud needs
+    # (not "one complete thought at a time": the 27B takes it literally and stops after a sentence or two)
     system = (f"You are {c.d['name']}. {c.d['persona']}\n\n"
-              f"You're speaking out loud, live: plain spoken sentences, one complete thought at a time, and finish it "
-              f"before you stop. No lists, headings or emoji.")
+              f"You're speaking out loud, live, in plain spoken sentences. Keep going like a streamer on a roll: riff for a "
+              f"good while, a run of sentences that build on each other, and finish your thought before you stop. "
+              f"No lists, headings or emoji.")
     msgs = [{"role": "system", "content": system}]
     for asked, reply in (history or []):
         msgs += [{"role": "user", "content": asked}, {"role": "assistant", "content": reply}]

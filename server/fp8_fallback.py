@@ -104,11 +104,33 @@ from transformers import AutoModelForCausalLM as _Auto
 _orig = _Auto.from_pretrained.__func__
 
 
+def quantize_linear(layer: torch.nn.Linear):
+    """Store a bf16 linear layer as FP8 with 128x128 block scales (the checkpoint's own format) and run it through the
+    same kernel: half the bytes read each step. Used for the output layer (BTM_LMHEAD_FP8=1): 2.5 GB -> 1.3 GB."""
+    w = layer.weight.data
+    o, i = w.shape
+    if o % 128 or i % 128:
+        return False
+    blocks = w.float().view(o // 128, 128, i // 128, 128)
+    scale = (blocks.abs().amax(dim=(1, 3)) / 448.0).clamp_min(1e-12)          # [o/128, i/128]: e4m3's largest value is 448
+    q = (blocks / scale[:, None, :, None]).clamp(-448, 448).to(torch.float8_e4m3fn).view(o, i)
+    layer.weight = torch.nn.Parameter(q, requires_grad=False)
+    layer.register_buffer("weight_scale_inv", scale, persistent=False)
+    layer.forward = _blockwise(layer, scale)
+    return True
+
+
 def _from_pretrained(cls, repo, *args, **kwargs):
+    import os
     model = _orig(cls, repo, *args, **kwargs)
     n = fix_unconverted(model, repo)
     if n:
         print(f"[fp8] {n} plain linear layers given their block scales", flush=True)
+    head = getattr(model, "lm_head", None)
+    if os.environ.get("BTM_LMHEAD_FP8") == "1" and isinstance(head, torch.nn.Linear) and head.weight.dtype == torch.bfloat16:
+        if quantize_linear(head):
+            torch.cuda.empty_cache()
+            print("[fp8] output layer stored as FP8", flush=True)
     return model
 
 
