@@ -52,7 +52,7 @@ export const HOW_STEPS = [
   },
   {
     title: 'Inside, feelings are directions',
-    body: `<p>While it reads and writes, the AI keeps a hidden state: a list of 4,096 numbers. We asked it to write short stories about characters who feel joy, sadness, anger, fear, calm or curiosity, then recorded its hidden state as it wrote. Each feeling's average turned out to be a <b>direction</b> in that space. It's the same recipe Anthropic used to find 171 emotion concepts inside Claude in 2026.</p><p>This is the real map of those six directions, flattened to 2D. Its biggest axis sorts pleasant feelings from unpleasant ones. Nobody programmed that in; it came out of the model.</p>`,
+    body: `<p>While it reads and writes, the AI keeps a hidden state: a list of 5,120 numbers. We asked it to write short stories about characters who feel joy, sadness, anger, fear, calm or curiosity, then recorded its hidden state as it wrote. Each feeling's average turned out to be a <b>direction</b> in that space. It's the same recipe Anthropic used to find 171 emotion concepts inside Claude in 2026.</p><p>This is the real map of those six directions, flattened to 2D. Its biggest axis sorts pleasant feelings from unpleasant ones. Nobody programmed that in; it came out of the model.</p>`,
     viz: (map) => mapSVG(map),
   },
   {

@@ -21,8 +21,8 @@
 <h2>Ask it things</h2>
 <p>Anyone watching can ask it a question. Questions wait in one line per coin, one per visitor at a time, and it answers each when its current thought ends.</p>
 <h2>Under the hood</h2>
-<p>The androids run on <b>Qwen3.5-9B</b>, an open-weight language model, on our own GPU: all of them share one model, each with its own push.
-Their feelings are directions in its hidden state (16 of its 32 layers in), found by having it read the same texts with and
+<p>The androids run on <b>Qwen3.8-27B</b>, an open-weight language model, on our own GPU: all of them share one model, each with its own push.
+Their feelings are directions in its hidden state (32 of its 64 layers in), found by having it read the same texts with and
 without a feeling. Pushing an android adds some of those directions while it writes; its face shows what its own state reads along them.</p>
 <h2>What the face shows</h2>
 <p>The face is driven by a <b>measurement</b> of patterns inside the model associated with emotional language. That isn't evidence the model feels anything. The steering is real: it changes what the model computes.</p>
