@@ -102,7 +102,14 @@ form.onsubmit = async (e) => {
       body.mint = await launchOnPump(body, (t) => { $('#err').textContent = t; });   // the coin is created on pump.fun first; then its android
       body.market = 'pair';
     }
-    const r = await post('api/coins', body);
+    let r;
+    for (let t0 = Date.now(); ; ) {   // a coin that has only just landed may not be readable on chain for a little while
+      try { r = await post('api/coins', body); break; } catch (e) {
+        if (market !== 'pump' || !/no bonding curve|didn't confirm|creator fees go elsewhere/.test(e.message) || Date.now() - t0 > 180e3) throw e;
+        $('#err').textContent = 'Still confirming on chain… (this can take a minute)';
+        await new Promise((ok) => setTimeout(ok, 5000));
+      }
+    }
     location.href = `coin?id=${encodeURIComponent(r.id)}`;
   } catch (err) {
     $('#err').textContent = err.message || String(err);

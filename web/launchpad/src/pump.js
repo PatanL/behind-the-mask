@@ -30,7 +30,9 @@ export async function launchOnPump(coin, note = () => {}) {
   note(txs.length > 1 ? 'Approve the launch in your wallet (then the first buy).' : 'Approve the launch in your wallet.');
   const signature = await w.signAndSend(txs[0]);
   note('Waiting for it to confirm on chain…');
-  await post('api/pump/confirm', { mint: mint.publicKey.toBase58(), signature });
+  // (a busy network can take over a minute: if the server's check gives up first, the android's registration below
+  // waits for the coin itself to appear on chain)
+  await post('api/pump/confirm', { mint: mint.publicKey.toBase58(), signature }).catch(() => note('Still confirming on chain…'));
   if (txs[1]) {   // too big for one transaction: the first buy goes right after the coin exists
     try {
       txs[1].message.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
