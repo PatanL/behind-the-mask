@@ -127,7 +127,7 @@ class MultiMind:
         m = self.mind
         with self.lock:
             m.set_coef(self._coef([row]))
-            out = _forward(self.model, torch.tensor([prompt_ids], device=m.device), None, 1024)
+            out = _forward(self.model, torch.tensor([prompt_ids], device=m.device), None, 2048)   # (fewer, bigger passes: FP8 weights are unpacked once a pass)
             row.pos, row.reply, row.force = len(prompt_ids), [], collections.deque()
             self._merge(out.past_key_values, len(prompt_ids))
             self.rows.append(row)
@@ -268,6 +268,15 @@ class MultiMind:
         self.mask = torch.cat([self.mask, torch.zeros(self.mask.shape[0], k, dtype=torch.bool, device=dev)], 1)
         for i, _ in subs:
             self.mask[i, T:] = True
+
+    def clone(self, src_key: str, row: Row) -> bool:
+        """Add a row whose memory is a copy of another's (e.g. a mirror of a row whose memory was read unpushed)."""
+        with self.lock:
+            src = self.row(src_key)
+            if src is None or self.row(row.key) is not None:
+                return False
+            self._clone(self.rows.index(src), row)
+            return True
 
     def row(self, key: str) -> Row | None:
         return next((r for r in self.rows if r.key == key), None)

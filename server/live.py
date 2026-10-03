@@ -52,6 +52,7 @@ TAP_RATE, TAP_BURST = 6.0, 8.0   # per-visitor token bucket (taps / s, burst)
 GAP = 0.0                # s between turns (the face takes its breath while the next turn starts)
 SESSION_SECONDS = 30 * 60  # then it starts afresh
 TOPIC_SECONDS = 5 * 60   # each topic runs at least this long (unless someone asks for a new one)
+REREAD = float(os.environ.get("BTM_REREAD", "0.6"))   # when the memory is full: re-read this share of it (less is a shorter pause)
 HISTORY_TOKENS = int(os.environ.get("BTM_HISTORY_TOKENS", "10000"))  # total prompt budget: opening + rolling displayed history + next nudge
 TOPIC_COOLDOWN = 120.0   # s between "new topic" requests (one for everyone, so a crowd can't flip it constantly)
 BUTTONS = EMOTIONS + ["unmask"]
@@ -209,11 +210,14 @@ class SharedEngine:
             lead.on_token, lead.on_end, lead.steer, lead.soft, lead.max_new = on_token, on_end, steer_ref, SOFT_TOKENS, TOKENS
             mm.read_now([self.KEY, self.MIRROR], ids[len(self.ids):]) or mm.say(self.KEY, ids[len(self.ids):])
         else:
-            self.rest()   # read afresh: all but the last token on their own, the last in the batch (where it starts writing,
-            #               and its unpushed twin starts beside it)
-            mm.add(Row(key=self.MIRROR, mirror=self.KEY), ids[:-1])
-            mm.add(Row(key=self.KEY, steer=steer_ref, on_token=on_token, on_end=on_end, soft=SOFT_TOKENS, max_new=TOKENS,
-                       rep_penalty=REP_PENALTY, rep_window=120, no_repeat_ngram=NO_REPEAT_NGRAM), ids[:-1], begin=False)
+            # read afresh, once: its memory is what was said, read unpushed (the push is for what comes next), so the
+            # mirror is a copy of it; the last token is read with both, where it starts writing and its twin beside it
+            self.rest()
+            lead = Row(key=self.KEY, steer={}, on_token=on_token, on_end=on_end, soft=SOFT_TOKENS, max_new=TOKENS,
+                       rep_penalty=REP_PENALTY, rep_window=120, no_repeat_ngram=NO_REPEAT_NGRAM)
+            mm.add(lead, ids[:-1], begin=False)
+            mm.clone(self.KEY, Row(key=self.MIRROR, mirror=self.KEY))
+            lead.steer = steer_ref
             mm.read_now([self.KEY, self.MIRROR], ids[-1:]) or mm.say(self.KEY, ids[-1:])
         emit({"type": "turn_begin", "prompt": "", "layer": {"chat": self.chat.layer}, "n_layers": {"chat": self.chat.n_layers}})
         while not done.wait(0.1):
@@ -463,7 +467,7 @@ async def speak_turn():
         prompt_ids = snap["ids"] + snap["tail"] + engine.chat.tokenizer(TURN.format(nudge=nudge), add_special_tokens=False)["input_ids"]
         if len(prompt_ids) + TOKENS > HISTORY_TOKENS:
             snap = prompt_ids = None
-    msgs = [{"role": "user", "content": nudge}] if snap is not None else window(nudge, HISTORY_TOKENS if not T["turns"] else int(HISTORY_TOKENS * 0.6))
+    msgs = [{"role": "user", "content": nudge}] if snap is not None else window(nudge, HISTORY_TOKENS if not T["turns"] else int(HISTORY_TOKENS * REREAD))
     cancel = threading.Event()
     streams = {s: {"tokens": [], "text": ""} for s in ("steered", "plain")}
     story = {"id": secrets.token_hex(5), "topic": topic, "streams": streams}
