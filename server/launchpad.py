@@ -438,7 +438,7 @@ async def end_turn(c: Coin, text: str):
     await broadcast_coin(c, {"type": "end", "id": t["id"]})
     toks = t["tokens"]
     if c.d.get("mu") is None and len(toks) >= 12:      # the first, unpushed reply sets its baseline
-        c.d["mu"] = [round(sum(w["e"][k] for w in toks) / len(toks), 3) for k in range(7)]
+        c.d["mu"] = [round(sum(w["e"][k] for w in toks) / len(toks), 3) for k in range(len(EMOTIONS))]
         c.save()
     log_turn(c)
     words = len(text.split())
