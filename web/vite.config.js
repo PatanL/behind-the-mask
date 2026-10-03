@@ -5,10 +5,10 @@ import { siteMeta } from './site-meta.js';
 // steerai.live: the launchpad (web/launchpad: every coin has a live android) at the root, and the Steer AI exhibit
 // (index.html, web/src) at /exhibit/, built by the plugin below with vite.exhibit.config.js. BTM_BASE lets the same
 // build live at a sub-path (GitHub Pages without a custom domain: /behind-the-mask/).
-// /api is the launchpad server (server/launchpad.py); /live is the exhibit's crowd-steering server (server/live.py).
+// /api is the launchpad server (server/launchpad.py); /live is the home android (server/live.py), served by the launchpad.
 const R = (p) => resolve(import.meta.dirname, p);
 const pages = ['index', 'explore', 'coin', 'launch', 'docs', 'setup'];
-const proxy = { '/api': { target: 'http://127.0.0.1:8770', ws: true }, '/live': { target: process.env.BTM_LIVE_TARGET || 'http://127.0.0.1:8765', ws: true } };   // (BTM_LIVE_TARGET: a preview against another live server)
+const proxy = { '/api': { target: 'http://127.0.0.1:8770', ws: true }, '/live': { target: process.env.BTM_LIVE_TARGET || 'http://127.0.0.1:8770', ws: true } };   // (the launchpad serves the home android too: LP_HOME=1)
 const exhibit = { name: 'exhibit', apply: 'build', async closeBundle() { if (!process.env.LP_NO_EXHIBIT) await build({ configFile: R('vite.exhibit.config.js'), root: R('.') }); } };
 export default defineConfig({
   root: R('launchpad'),

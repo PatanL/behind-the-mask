@@ -158,6 +158,78 @@ STRONG = {e: float(levels[e]["lot"]) for e in EMOTIONS}
 STRONG["assistant"] = float(levels["assistant"]["lot"])
 BASE_STEER = {e: float(v) for e, v in (("joy", os.environ.get("BTM_BASE_JOY", "0.12")),) if float(v) > 0}   # always on
 engine: Engine | None = None
+# Shared mode: the launchpad serves this android too, as rows of its own batch (one model for the home page and every
+# coin). It sets SHARED to a function returning its (mind, MultiMind) once they're loaded.
+SHARED = None
+
+
+class SharedEngine:
+    """The home android as two rows of the launchpad's batch: the one people watch, pushed by the crowd, and its
+    mirror, reading the same words unpushed (the baseline readout, and what it would have said without the push).
+    Same interface as Engine.run for speak_turn; its memory stays in the batch between turns, so a turn reads only
+    the new words."""
+    KEY, MIRROR = "home", "home-mirror"
+
+    def __init__(self, mind, mm):
+        self.chat, self.mm, self.labels = mind, mm, mind.labels
+        self.cfg = GenConfig()
+        self.snapshot, self.reused = None, False
+        self.ids = None            # what the home rows have read so far (prompt + replies), while they're in the batch
+
+    def rest(self):
+        """Nobody is watching: leave the batch (the next turn reads its memory afresh)."""
+        for k in (self.KEY, self.KEY + "-plain", self.MIRROR):
+            self.mm.remove(k)
+        self.ids = None
+
+    def run(self, prompt, steer_ref: dict, emit, cancel: threading.Event | None = None, seed=None, prompt_ids=None, reuse=None):
+        from multimind import Row
+        tok, mm, labels = self.chat.tokenizer, self.mm, self.labels
+        ids = list(prompt_ids) if prompt_ids is not None else tok(tok.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True, enable_thinking=False), add_special_tokens=False)["input_ids"]
+        done, reply, out = threading.Event(), [], {}
+
+        def on_token(r, t):
+            reply.append(t["id"])
+            e = t["e"]
+            b = t.get("b")
+            items = [{"stream": "steered", "text": t["t"], "p": t["p"], "alts": t["a"], "cf_alts": t.get("cf", []),
+                      "emo": {l: e[k] for k, l in enumerate(labels)}, "done": False}]
+            if b is not None:
+                items.append({"stream": "plain", "text": "", "p": 0.0, "alts": [], "emo": {l: b[k] for k, l in enumerate(labels)}, "done": False})
+            emit({"type": "tokens", "items": items, "steer": {l: float(t["steer"].get(l, 0.0)) for l in labels}})
+
+        def on_end(r, text):
+            out["text"] = text
+            done.set()
+
+        lead = mm.row(self.KEY)
+        self.reused = lead is not None and self.ids is not None and len(ids) > len(self.ids) and ids[:len(self.ids)] == self.ids
+        t0 = time.time()
+        if self.reused:
+            lead.on_token, lead.on_end, lead.steer, lead.soft, lead.max_new = on_token, on_end, steer_ref, SOFT_TOKENS, TOKENS
+            mm.say(self.KEY, ids[len(self.ids):])
+        else:
+            self.rest()   # read afresh: all but the last token on their own, the last in the batch (where it starts writing,
+            #               and its unpushed twin starts beside it)
+            mm.add(Row(key=self.MIRROR, mirror=self.KEY), ids[:-1])
+            mm.add(Row(key=self.KEY, steer=steer_ref, on_token=on_token, on_end=on_end, soft=SOFT_TOKENS, max_new=TOKENS,
+                       rep_penalty=REP_PENALTY, rep_window=120, no_repeat_ngram=NO_REPEAT_NGRAM), ids[:-1], begin=False)
+            mm.say(self.KEY, ids[-1:])
+        emit({"type": "turn_begin", "prompt": "", "layer": {"chat": self.chat.layer}, "n_layers": {"chat": self.chat.n_layers}})
+        while not done.wait(0.1):
+            r = mm.row(self.KEY)
+            if r is None:          # taken out meanwhile
+                break
+            if cancel is not None and cancel.is_set():
+                r.finish = True
+            elif crowd.change:     # someone asked for a new topic: end at this sentence
+                r.stop_soon = True
+        end = tok.convert_tokens_to_ids("<|im_end|>")
+        self.ids = ids + reply + [end] if mm.row(self.KEY) is not None else None   # (the end token is read next step)
+        self.snapshot = {"ids": self.ids, "tail": []} if self.ids is not None else None
+        text = out.get("text", tok.decode(reply, skip_special_tokens=True))
+        emit({"type": "turn_end", "texts": {"steered": text, "plain": ""}, "seconds": round(time.time() - t0, 2)})
+        return {"steered": text}
 
 
 def r(x, n=3):
@@ -490,6 +562,8 @@ async def talk_loop():
     while True:
         if not crowd.clients:          # nobody watching: don't spend the GPU
             crowd.has_clients.clear()
+            if isinstance(engine, SharedEngine):   # (and don't keep a place in the shared batch)
+                await asyncio.get_running_loop().run_in_executor(None, engine.rest)
             await crowd.has_clients.wait()
         now = time.time()
         if crowd.talk is None or now - crowd.talk["started"] > SESSION_SECONDS or now - crowd.last_seen > 300:
@@ -521,6 +595,14 @@ async def tick_loop():
 async def wake():
     """Load the model in the background, so the page can say it's waking up instead of failing to connect."""
     global engine
+
+    if SHARED is not None:   # the launchpad's batch: wait for it to load
+        while SHARED() is None:
+            await asyncio.sleep(1)
+        engine = SharedEngine(*SHARED())
+        print(f"[live] ready: sharing the launchpad's batch, layer {engine.chat.layer}", flush=True)
+        asyncio.create_task(talk_loop())
+        return
 
     def load():
         chat = load_mind("chat", CHAT, True); chat.load(DIRS / "chat_dirs.pt")

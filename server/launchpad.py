@@ -738,6 +738,14 @@ ORIGINS = [o for o in os.environ.get("LP_ORIGINS", "https://steerai.live,https:/
                                     "https://patanl.github.io,https://spark-3a11.tail621a3a.ts.net,http://100.97.32.64:4360,http://127.0.0.1:5197").split(",") if o]
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST"], allow_headers=["content-type"])
 
+# LP_HOME=1: the home page's android (live.py: /live/...) runs here too, as two rows of this batch -- one model for
+# the home page and every coin (two models on one GPU take turns; one batch shares each read of the weights)
+HOME = os.environ.get("LP_HOME") == "1"
+if HOME:
+    import live
+    live.SHARED = lambda: (ENGINE["chat"], ENGINE["mm"]) if ENGINE["mm"] is not None else None
+    app.router.routes.extend(r for r in live.app.router.routes if getattr(r, "path", "").startswith("/live"))
+
 
 @app.on_event("startup")
 async def startup():
@@ -758,6 +766,9 @@ async def startup():
             asyncio.ensure_future(c.market.seed())
     asyncio.ensure_future(explore_loop())
     asyncio.ensure_future(lp_pump.sol_price_loop())
+    if HOME:
+        asyncio.ensure_future(live.tick_loop())
+        asyncio.ensure_future(live.wake())
     asyncio.ensure_future(lp_pump.chain_loop(lambda: [c.market for c in COINS.values()]))   # exact reserves; graduated coins' prices
     asyncio.ensure_future(state_loop())
     asyncio.ensure_future(ping_loop())
