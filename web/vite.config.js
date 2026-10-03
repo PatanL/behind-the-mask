@@ -19,5 +19,7 @@ export default defineConfig({
     rollupOptions: { input: Object.fromEntries(pages.map((p) => [p, R(`launchpad/${p}.html`)])) } },
   server: { proxy },
   // the public Tailscale Funnel hostname proxies to `vite preview`
-  preview: { allowedHosts: ['spark-3a11.tail621a3a.ts.net'], proxy },
+  // cors: false -- the API answers cross-origin checks itself (steerai.live posts to it); vite's own answer omitted the
+  // allowed origin, so browsers refused every POST (a launch's portrait upload, the RPC relay)
+  preview: { allowedHosts: ['spark-3a11.tail621a3a.ts.net'], proxy, cors: false },
 });
