@@ -761,7 +761,7 @@ def stats(demo: bool = False) -> dict:
 app = FastAPI()
 ORIGINS = [o for o in os.environ.get("LP_ORIGINS", "https://steerai.live,https://www.steerai.live,http://steerai.live,http://www.steerai.live,"
                                     "https://patanl.github.io,https://spark-3a11.tail621a3a.ts.net,http://100.97.32.64:4360,http://127.0.0.1:5197").split(",") if o]
-app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST"], allow_headers=["content-type"])
+app.add_middleware(CORSMiddleware, allow_origins=ORIGINS, allow_methods=["GET", "POST"], allow_headers=["content-type", "solana-client"])   # (web3.js sends solana-client)
 
 # LP_HOME=1: the home page's android (live.py: /live/...) runs here too, as two rows of this batch -- one model for
 # the home page and every coin (two models on one GPU take turns; one batch shares each read of the weights)

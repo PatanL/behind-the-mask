@@ -2,7 +2,7 @@
 // made here, in the browser, and signs too (the server never holds a key). The coin's creator (who gets its creator
 // fees) is the Steer AI treasury the server names. The server uploads the image + metadata (pump.fun doesn't allow
 // that from a browser) and relays this page's Solana reads; the transaction is built here (pumpcreate.js).
-import { api, get, post } from './api.js';
+import { api, get, post, rpcConnection } from './api.js';
 import { connect, address } from './wallet.js';
 
 export async function pumpStatus() { try { return await get('api/pump/status'); } catch { return { launch: false }; } }
@@ -22,7 +22,7 @@ export async function launchOnPump(coin, note = () => {}) {
     description: `${coin.persona.length > 900 ? `${coin.persona.slice(0, 900)}…` : coin.persona}\n\nA live android on Steer AI.`, image: coin.image, dev_buy_sol: coin.devBuy || 0,
     persona: coin.persona,
   });
-  const connection = new Connection(new URL(api('api/rpc'), location.href).href, 'confirmed');
+  const connection = rpcConnection(Connection);
   const alt = r.alt ? (await connection.getAddressLookupTable(new PublicKey(r.alt))).value : null;
   const txs = await buildLaunch({ connection, alt, mint: mint.publicKey, user, creator: new PublicKey(r.creator),
     name: coin.name, symbol: coin.ticker, uri: r.uri, devBuySol: coin.devBuy || 0 });

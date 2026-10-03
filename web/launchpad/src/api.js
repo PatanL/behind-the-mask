@@ -20,3 +20,15 @@ export function visitorId() {
   catch { return Math.random().toString(36).slice(2, 12); }
 }
 export const imgUrl = (p) => (p ? api(p) : null);
+
+/** A Solana connection through the server's RPC relay. (web3.js adds a "solana-client" header to every request; across
+ *  origins that header needs the API's permission, so it's dropped: the relay doesn't use it.) */
+export function rpcConnection(Connection) {
+  const plain = (input, init = {}) => {
+    let headers = init.headers || {};
+    if (typeof Headers !== 'undefined' && headers instanceof Headers) { headers = new Headers(headers); headers.delete('solana-client'); }
+    else headers = Object.fromEntries(Object.entries(headers).filter(([k]) => k.toLowerCase() !== 'solana-client'));
+    return fetch(input, { ...init, headers });
+  };
+  return new Connection(new URL(api('api/rpc'), location.href).href, { commitment: 'confirmed', fetch: plain });
+}

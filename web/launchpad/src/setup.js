@@ -2,7 +2,7 @@
 // accounts, the token programs, the treasury's creator vault...), so create + first buy fit in one transaction.
 // The connected wallet pays and owns the table. Its address then goes in the server's settings (runs/launchpad/pump.json).
 import './style.css';
-import { api, get } from './api.js';
+import { api, get, rpcConnection } from './api.js';
 import { $, header, footer } from './ui.js';
 import { connect, address } from './wallet.js';
 
@@ -18,7 +18,7 @@ $('#go').onclick = async () => {
     const st = await get('api/pump/status');
     if (!st.treasury) throw new Error('The server has no treasury set yet.');
     const w = await connect(); const me = new PublicKey(address);
-    const connection = new Connection(new URL(api('api/rpc'), location.href).href, 'confirmed');
+    const connection = rpcConnection(Connection);
     // the accounts two launches (different coins) have in common, minus the payer; plus every protocol fee recipient
     const keysOf = async () => (await launchInstructions({ connection, mint: Keypair.generate().publicKey, user: me, creator: new PublicKey(st.treasury), name: 'x', symbol: 'X', uri: 'u', devBuySol: 0.01 }))
       .flatMap((ix) => [ix.programId, ...ix.keys.map((k) => k.pubkey)]).map((k) => k.toBase58());
