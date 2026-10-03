@@ -162,6 +162,113 @@ class MultiMind:
             r.after = "write"
             return True
 
+    @torch.no_grad()
+    def read_now(self, keys: list[str], ids: list[int]) -> bool:
+        """Read the same new prompt tokens for these rows now, each in one pass outside the batch (a few tenths of a
+        second, where say() takes a step per token), splice them in as new cache columns (masked for every other
+        row), and start their replies -- a mirror among them reads unpushed, and its leader's twin starts beside it."""
+        with self.lock:
+            rows = [self.row(k) for k in keys]
+            if not ids or any(r is None or r.writing for r in rows):
+                return False
+            # (tokens still waiting to be read -- the last reply's end token -- are read first; a mirror waits on its leader's)
+            pend = {r.key: list((self.row(r.mirror) if r.mirror is not None else r).force) for r in rows}
+            if len({len(v) for v in pend.values()}) > 1:
+                return False
+            ids = next(iter(pend.values())) + list(ids)
+            for r in rows:
+                r.force.clear()
+            dev, k = self.mind.device, len(ids)
+            subs, last = [], []
+            for r in rows:   # (one row at a time, 64 tokens at a time: the FP8 kernel's fast path)
+                i = self.rows.index(r)
+                idx = torch.tensor([i], device=dev)
+                sub, msk, pos = self._slice(idx), self.mask.index_select(0, idx), r.pos
+                self.mind.set_coef(self._coef([r]))
+                for c0 in range(0, k, 64):
+                    part = ids[c0:c0 + 64]
+                    msk = torch.cat([msk, torch.ones(1, len(part), dtype=torch.bool, device=dev)], 1)
+                    out = self.model(torch.tensor([part], device=dev), past_key_values=sub, attention_mask=msk.long(),
+                                     position_ids=torch.arange(pos, pos + len(part), device=dev)[None], use_cache=True, logits_to_keep=1)
+                    sub, pos = out.past_key_values, pos + len(part)
+                subs.append((i, sub))
+                last.append(out.logits[0, -1])
+            self._splice(subs, k)
+            for r in rows:
+                r.pos += k
+            logits = torch.stack(last)
+            mirror_j = {r.mirror: j for j, r in enumerate(rows) if r.mirror is not None}
+            leads = [(j, r) for j, r in enumerate(rows) if r.mirror is None]
+            if not leads:
+                return True
+            got = self._sample_many([r for _, r in leads], logits[torch.tensor([j for j, _ in leads], device=dev)])
+            for (j, r), (t, info) in zip(leads, got):
+                mj = mirror_j.get(r.key)
+                if mj is not None:
+                    self._unpushed_view(r, logits[mj], t, info)
+                r.reply, r.writing, r.stop_soon, r.finish, r.after = [], True, False, False, "rest"
+                if t in self.stops:
+                    self._end(r, t)
+                    continue
+                r.next_id, r.next_info = t, info
+                if mj is not None and self.row(r.key + "-plain") is None:
+                    self._twin(r, self.rows.index(rows[mj]), logits[mj])
+            return True
+
+    def _unpushed_view(self, r: Row, mirror_logits, t: int, info: dict):
+        """The mirror's view of the word its leader drew (with the leader's repetition control): top 4 and its odds."""
+        pm = torch.softmax(self._penalize(mirror_logits[None].float().clone(), [r]), -1)[0]
+        cv, ci = torch.topk(pm, 4)
+        info["cf"] = [[self.tok.decode([x]), round(y, 4)] for x, y in zip(ci.tolist(), cv.tolist())]
+        info["q"] = round(float(pm[t]), 4)
+
+    def _twin(self, r: Row, mirror_i: int, mirror_logits):
+        """Its unpushed twin for this reply: a copy of the mirror's memory, starting its own answer."""
+        p = Row(key=r.key + "-plain", plain_of=r.key, max_new=r.max_new, soft=r.soft, temperature=r.temperature,
+                top_p=r.top_p, rep_penalty=r.rep_penalty, rep_window=r.rep_window, no_repeat_ngram=r.no_repeat_ngram)
+        p.recent.extend(r.recent)
+        self._clone(mirror_i, p)
+        self._begin(p, mirror_logits)
+
+    def _slice(self, idx):
+        """A cache holding only these rows (copies: the batch's cache is untouched)."""
+        import copy
+        sub = copy.copy(self.cache)
+        sub.layers = []
+        for layer in self.cache.layers:
+            nl = copy.copy(layer)
+            for n in ("conv_states", "recurrent_states"):
+                v = getattr(layer, n, None)
+                if isinstance(v, (list, tuple)):
+                    setattr(nl, n, list(v))
+                elif isinstance(v, dict):
+                    setattr(nl, n, dict(v))
+            att, rec = _layer_tensors(layer)
+            for n, x in att:
+                setattr(nl, n, x.index_select(0, idx))
+            for n, i, t in rec:
+                getattr(nl, n)[i] = t.index_select(0, idx)
+            sub.layers.append(nl)
+        return sub
+
+    def _splice(self, subs, k: int):
+        """Put rows read on their own (each: (row index, its cache, k tokens longer)) back: k new columns for all."""
+        dev = self.mind.device
+        T = self.mask.shape[1]
+        for li, layer in enumerate(self.cache.layers):
+            att_b, rec_b = _layer_tensors(layer)
+            for a_i, (n, xb) in enumerate(att_b):
+                y = torch.cat([xb, xb.new_zeros(xb.shape[0], xb.shape[1], k, xb.shape[3])], 2)
+                for i, sub in subs:
+                    y[i] = _layer_tensors(sub.layers[li])[0][a_i][1][0]
+                setattr(layer, n, y)
+            for r_i, (n, j, xb) in enumerate(rec_b):
+                for i, sub in subs:
+                    xb[i] = _layer_tensors(sub.layers[li])[1][r_i][2][0].to(xb.dtype)
+        self.mask = torch.cat([self.mask, torch.zeros(self.mask.shape[0], k, dtype=torch.bool, device=dev)], 1)
+        for i, _ in subs:
+            self.mask[i, T:] = True
+
     def row(self, key: str) -> Row | None:
         return next((r for r in self.rows if r.key == key), None)
 
@@ -351,14 +458,8 @@ class MultiMind:
             if draw:
                 got = self._sample_many([r for _, r, _ in draw], logits[torch.tensor([i for i, _, _ in draw], device=dev)])
                 led = [(n, r, mirrors[r.key]) for n, (_, r, _) in enumerate(draw) if r.key in mirrors]
-                if led:   # the mirrors' view of the same next word (with the leader's repetition control, as it was drawn)
-                    pm = torch.softmax(self._penalize(logits[torch.tensor([mi for _, _, mi in led], device=dev)].float().clone(),
-                                                      [r for _, r, _ in led]), -1)
-                    cv, ci = torch.topk(pm, 4, dim=-1)
-                    for k, (n, r, _) in enumerate(led):
-                        t, info = got[n]
-                        info["cf"] = [[self.tok.decode([x]), round(y, 4)] for x, y in zip(ci[k].tolist(), cv[k].tolist())]
-                        info["q"] = round(float(pm[k, t]), 4)
+                for n, r, mi in led:   # the mirrors' view of the same next word
+                    self._unpushed_view(r, logits[mi], *got[n])
                 start_plain = []
                 for (i, r, what), (t, info) in zip(draw, got):
                     if what == "begin":
@@ -377,11 +478,7 @@ class MultiMind:
                     else:
                         r.next_id, r.next_info = t, info
                 for r, mi in start_plain:   # its unpushed twin starts from the mirror's memory (the same conversation)
-                    p = Row(key=r.key + "-plain", plain_of=r.key, max_new=r.max_new, soft=r.soft, temperature=r.temperature,
-                            top_p=r.top_p, rep_penalty=r.rep_penalty, rep_window=r.rep_window, no_repeat_ngram=r.no_repeat_ngram)
-                    p.recent.extend(r.recent)
-                    self._clone(mi, p)
-                    self._begin(p, logits[mi])
+                    self._twin(r, mi, logits[mi])
             for r in [r for r in self.rows if r.plain_of is not None]:
                 lead = self.row(r.plain_of)
                 if lead is None or not lead.writing:   # its leader's reply ended: so does the twin

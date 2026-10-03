@@ -207,14 +207,14 @@ class SharedEngine:
         t0 = time.time()
         if self.reused:
             lead.on_token, lead.on_end, lead.steer, lead.soft, lead.max_new = on_token, on_end, steer_ref, SOFT_TOKENS, TOKENS
-            mm.say(self.KEY, ids[len(self.ids):])
+            mm.read_now([self.KEY, self.MIRROR], ids[len(self.ids):]) or mm.say(self.KEY, ids[len(self.ids):])
         else:
             self.rest()   # read afresh: all but the last token on their own, the last in the batch (where it starts writing,
             #               and its unpushed twin starts beside it)
             mm.add(Row(key=self.MIRROR, mirror=self.KEY), ids[:-1])
             mm.add(Row(key=self.KEY, steer=steer_ref, on_token=on_token, on_end=on_end, soft=SOFT_TOKENS, max_new=TOKENS,
                        rep_penalty=REP_PENALTY, rep_window=120, no_repeat_ngram=NO_REPEAT_NGRAM), ids[:-1], begin=False)
-            mm.say(self.KEY, ids[-1:])
+            mm.read_now([self.KEY, self.MIRROR], ids[-1:]) or mm.say(self.KEY, ids[-1:])
         emit({"type": "turn_begin", "prompt": "", "layer": {"chat": self.chat.layer}, "n_layers": {"chat": self.chat.n_layers}})
         while not done.wait(0.1):
             r = mm.row(self.KEY)

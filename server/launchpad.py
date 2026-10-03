@@ -455,7 +455,7 @@ async def next_turn(c: Coin):
         return
     c.turn = {"id": secrets.token_hex(4), "tokens": [], "asked": c.asking["q"] if c.asking else None, "start": time.time(), "nudge": nudge}
     ids = ENGINE["chat"].tokenizer(TURN.format(nudge=nudge), add_special_tokens=False)["input_ids"]
-    ok = await job(lambda: mm.say(c.id, ids))
+    ok = await job(lambda: mm.read_now([c.id], ids) or mm.say(c.id, ids))   # (read in one pass: no pause between thoughts)
     if ok:
         c.status = "awake"
         await broadcast_coin(c, {"type": "begin", "id": c.turn["id"], "asked": c.turn["asked"]})
