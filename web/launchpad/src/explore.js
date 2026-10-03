@@ -7,7 +7,6 @@ import { faceFrom, Performer } from './feel.js';
 import { ORDER, EMO } from '../../src/palette.js';
 
 header('Explore'); footer();
-const DEMO = new URLSearchParams(location.search).has('demo');
 const wall = new FaceWall();
 let coins = [], sort = localStorage.getItem('lp-sort') || 'new', filter = 'all';
 const cards = new Map();   // id -> {el, slot, lift, lastLine}
@@ -134,7 +133,7 @@ function sorted() {
 function card(c) {
   const box = h('div', { class: 'face-box' });
   if (c.img) box.append(h('img', { class: 'portrait', src: imgUrl(c.img), alt: '' }));
-  const el = h('a', { class: 'card', href: `coin?id=${encodeURIComponent(c.id)}${DEMO ? '&demo=1' : ''}`, 'data-id': c.id },
+  const el = h('a', { class: 'card', href: `coin?id=${encodeURIComponent(c.id)}`, 'data-id': c.id },
     box, h('span', { class: 'status' }),
     h('div', { class: 'body' },
       h('div', { class: 'who' }, h('b', {}, c.name), h('span', { class: 'tk mono' }, `$${c.ticker}`)),
@@ -158,7 +157,7 @@ function update(c, d) {
   st.className = `status ${d.status === 'asleep' ? '' : d.status === 'losing it' ? 'losing' : 'awake'}`;
   c.el.classList.toggle('asleep', d.status === 'asleep');
   c.el.querySelector('.line').textContent = d.status === 'asleep' ? 'Asleep. A trade will wake it.' : tail(d.line);
-  const real = d.market !== 'sim' || DEMO;
+  const real = d.market !== 'sim';
   c.el.querySelector('.mcap').textContent = real ? inUsd(d.mcap_sol, solUsd) : 'not yet';
   const ch = c.el.querySelector('.chg'); ch.textContent = real ? pct(d.change_5m) : '—'; ch.className = `chg ${d.change_5m >= 0 ? 'up' : 'down'}`;
   c.el.querySelector('.tl').textContent = left(d.time_left);
@@ -214,7 +213,7 @@ function apply(m) {
 let listed = false;
 setTimeout(() => { if (!listed) $('#stats').replaceChildren(h('div', {}, h('b', {}, 'offline'), h('span', {}, 'the androids are resting'))); }, 6000);
 function connect() {
-  const ws = new WebSocket(`${wsUrl('api/ws/explore')}${DEMO ? '?demo=1' : ''}`);
+  const ws = new WebSocket(wsUrl('api/ws/explore'));
   exploreWs = ws;
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);

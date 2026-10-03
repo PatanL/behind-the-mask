@@ -825,7 +825,7 @@ def memory() -> dict:
 
 @app.get("/api/coins")
 def api_coins(sort: str = "new", demo: int = 0):
-    cs = [c.summary() for c in listed(bool(demo))]
+    cs = [c.summary() for c in listed(False)]   # (no demo listing any more)
     key = {"new": lambda s: -s["created"], "mcap": lambda s: -s["mcap_sol"], "emotional": lambda s: -s["intensity"],
            "volume": lambda s: -s["volume_sol"]}.get(sort, lambda s: -s["created"])
     cs.sort(key=lambda s: (not s["featured"], key(s)))
@@ -1040,7 +1040,7 @@ def api_logs(cid: str, turn: str | None = None):
 async def ws_explore(ws: WebSocket):
     await ws.accept()
     OUT[ws] = Out(ws)
-    demo = ws.query_params.get("demo") == "1"
+    demo = False   # (the explore page's demo listing is gone: the owner's call)
     await send(ws, {"type": "coins", "coins": [c.summary() for c in listed(demo)], "stats": stats(demo)})
     EXPLORE[ws] = demo
     try:
