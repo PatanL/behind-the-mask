@@ -440,9 +440,9 @@ async def speak_turn():
                 tok["s"] = [r(ev["steer"].get(e, 0.0)) for e in labels]
                 if it.get("feats"):
                     tok["f"] = [[fid, r(fv, 1)] for fid, fv in it["feats"][:6]]
-                # a long thought: past SOFT_TOKENS, end at the next sentence end (a new topic or a visitor's question
-                # waits for the thought to finish; the crowd steers every word meanwhile)
-                if len(st["tokens"]) >= SOFT_TOKENS and re.search(r"[.!?][\"')\]]*\s*$", st["text"] + it["text"]):
+                # a long thought: past SOFT_TOKENS, end at the next sentence end; so does a thought when someone has
+                # asked for a new topic (the page says "after this sentence"); a visitor's question waits for the thought
+                if (len(st["tokens"]) >= SOFT_TOKENS or crowd.change) and re.search(r"[.!?][\"')\]]*\s*$", st["text"] + it["text"]):
                     cancel.set()
             st["tokens"].append(tok); st["text"] += it["text"]
             out.append((it["stream"], tok))

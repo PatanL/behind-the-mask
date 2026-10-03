@@ -30,7 +30,9 @@ export class Governor {
     this.t0 = t;
     const s = this.win.slice().sort((a, b) => a - b), n = s.length, med = s[n >> 1], p10 = s[Math.floor(n * 0.1)], p90 = s[Math.floor(n * 0.9)];
     this.period = Math.min(this.period, med);                                  // the display's refresh, as the best windows show it
-    const hic = this.win.filter((x) => x > med * 1.5 && x < 120).length / n;   // hiccups: the visible stutter (one-off stalls are loading)
+    // hiccups: the visible stutter, frames late enough to see (past ~40 fps: on a 120 Hz screen an odd 16 ms frame isn't one;
+    // one-off stalls are loading)
+    const hic = this.win.filter((x) => x > Math.max(med * 1.5, 25) && x < 120).length / n;
     const slow = med > 22 && (p90 / p10 > 1.25 || hic > 0.03);                 // under ~45 fps and uneven (a steady 30 Hz cap is left alone)
     this.win.length = 0;
     if (this.hud) this.hud.textContent = `${this.name}  ${(1000 / med).toFixed(0)} fps  hiccups ${(hic * 100).toFixed(0)}%\nquality ${this.tiers.length - this.tier}/${this.tiers.length}`;
@@ -38,8 +40,9 @@ export class Governor {
     if ((hic > 0.08 || slow) && this.tier < this.tiers.length - 1) {
       if (t - this.upAt < 8000) this.floor = Math.min(this.tiers.length - 1, this.tier + 1);   // the last climb didn't hold: stay below it
       this.set(this.tier + 1, t); this.calm = 0;
-    } else if (hic < 0.02 && med < Math.min(this.period, 17) * 1.15) {
+    } else if (hic < 0.02 && med < Math.max(Math.min(this.period, 17) * 1.15, 18)) {   // (a steady 60 fps is room, even on a 120 Hz screen)
       if (++this.calm >= 10 && this.tier > this.floor) { this.set(this.tier - 1, t); this.calm = 0; this.upAt = t; }
+      else if (this.calm >= 40 && this.floor > 0) { this.floor--; this.calm = 0; }   // calm for ~40 s: a failed climb may be tried again
     } else this.calm = 0;
   }
 
