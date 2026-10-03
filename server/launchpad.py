@@ -266,10 +266,30 @@ def load_engine():
     chat = load_mind("chat", CHAT, True)
     chat.load(DIRS / "chat_dirs.pt")
     mm = MultiMind(chat, step_rate=STEP_RATE)
+    warm_up(mm)
     ENGINE.update(chat=chat, mm=mm)
     threading.Thread(target=engine_loop, daemon=True).start()
     ENGINE["loading"] = False
     print(f"[lp] ready: {CHAT}; {len(COINS)} coins", flush=True)
+
+
+def warm_up(mm):
+    """Run each shape of work once before anyone is served: GPU kernels compile on first use (the first viewer after a
+    restart otherwise waits ~20 s)."""
+    from multimind import Row
+    t0 = time.time()
+    ids = mm.tok("Warming up the engine before anyone arrives. " * 30, add_special_tokens=False)["input_ids"][:120]
+    try:
+        for n in (1, 12, 24, 48, 64):   # a new prompt of n tokens read in one pass, then a few words written
+            mm.add(Row(key="warm", max_new=3), ids, begin=False)
+            mm.read_now(["warm"], ids[:n])
+            for _ in range(4):
+                mm.step()
+            mm.remove("warm")
+    except Exception as e:  # noqa: BLE001
+        print("[lp] warm-up failed:", repr(e), flush=True)
+        mm.remove("warm")
+    print(f"[lp] warmed up in {time.time() - t0:.0f} s", flush=True)
 
 
 def engine_loop():
