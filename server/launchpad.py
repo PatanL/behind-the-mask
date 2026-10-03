@@ -132,7 +132,7 @@ class Coin:
         return self.d["ledger"]["grant_sol"] + self.market.fees_sol - self.d["ledger"]["spent_sol"]
 
     def time_left(self) -> float:
-        if self.d.get("featured"):
+        if self.d.get("featured") or lp_pump.settings().get("always_awake"):
             return float("inf")
         return max(0.0, self.balance()) / (COST_SOL_HOUR / 3600)
 
@@ -558,7 +558,7 @@ async def schedule():
     """Who is alive (the funded coins, the featured first, then by recent volume; at most MAX_ALIVE), and of them who
     speaks: by viewers and by how long each has waited (see score)."""
     st = lp_pump.settings()
-    funded = [c for c in COINS.values() if c.ready and (c.d.get("featured") or c.balance() > 0)]
+    funded = [c for c in COINS.values() if c.ready and (c.d.get("featured") or st.get("always_awake") or c.balance() > 0)]
     funded.sort(key=lambda c: (not c.d.get("featured"), -c.market.volume_sol, -c.balance()))
     alive = funded[:int(st.get("max_alive") or MAX_ALIVE)]
     ids = {c.id for c in alive}

@@ -39,11 +39,18 @@ AMM_CREATOR_FEE_BPS = float(os.environ.get("LP_AMM_CREATOR_FEE_BPS", "5"))   # t
 SETTINGS = Path(os.environ.get("LP_STATE", "runs/launchpad")) / "pump.json"
 
 
+_SETTINGS_CACHE: dict = {"mtime": None, "d": {}}
+
+
 def settings() -> dict:
     """The server's settings file: the treasury (every coin's creator: its fees), the address lookup table launches use,
-    and capacity (max_alive, slots, min_slots, max_slots). Env overrides the treasury and the table."""
+    capacity (max_alive, slots, min_slots, max_slots) and always_awake (no coin sleeps, whatever its balance). Env
+    overrides the treasury and the table. Re-read when the file changes."""
     try:
-        d = json.loads(SETTINGS.read_text())
+        mt = SETTINGS.stat().st_mtime
+        if mt != _SETTINGS_CACHE["mtime"]:
+            _SETTINGS_CACHE.update(mtime=mt, d=json.loads(SETTINGS.read_text()))
+        d = _SETTINGS_CACHE["d"]
     except (OSError, ValueError):
         d = {}
     return {**d, "treasury": os.environ.get("LP_TREASURY") or d.get("treasury") or "", "alt": os.environ.get("LP_ALT") or d.get("alt") or ""}
@@ -250,6 +257,8 @@ class PumpFeed:
                             m = json.loads(raw)
                         except Exception:  # noqa: BLE001
                             continue
+                        if m.get("message") and not m.get("mint"):   # (PumpPortal says why: e.g. trades now need a funded API key)
+                            print(f"[feed] PumpPortal: {str(m['message'])[:200]}", flush=True)
                         mk = self.markets.get(m.get("mint"))
                         if mk and m.get("txType") in ("buy", "sell"):
                             mk.on_trade(m)
