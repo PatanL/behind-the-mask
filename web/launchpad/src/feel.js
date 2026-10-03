@@ -24,7 +24,7 @@ function stressed(t) {
   return STRESS.has(w) || (w.length >= 7 && !PLAIN_LONG.has(w));
 }
 
-/** A performer: feed it words ({t, e: [6 feelings + concept]}) and it drives `face`. */
+/** A performer: feed it words ({t, e: [6 feelings]}) and it drives `face`. */
 export class Performer {
   constructor(face) { this.face = face; this.reset(); }
   reset(mu) { this.mu = mu || [0, 0, 0, 0, 0, 0, 0]; this.lift = ORDER.map(() => 0); this.i = 0; this.lastEmph = -10; this.shown = Object.fromEntries(ORDER.map((e) => [e, 0])); }

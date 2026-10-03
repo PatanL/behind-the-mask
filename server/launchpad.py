@@ -2,16 +2,14 @@
 
     uvicorn launchpad:app --host 127.0.0.1 --port 8770      (in btm-server, GPU; the web app: web/launchpad)
 
-A creator launches a coin and chooses its android: a character (persona prompt), what's under its mask (a custom
-steering direction built from their concept and example sentences), a temperament (feelings it drifts back to), a
-look, and a model. Its trading fees pay for its compute: while funded it is awake and talks live; when the money runs
+A creator launches a coin and chooses its android: a character (its prompt), a temperament (feelings it drifts back
+to), a look, and a model. Its trading fees pay for its compute: while funded it is awake and talks live; when the money runs
 out it falls asleep, and a trade wakes it.
 
 All awake androids share one model (multimind.MultiMind: one row each, one token per row per step). Each android's
 push is mixed every half second from
     its temperament
     +  the crowd's taps (everyone, holders only, or holders weighted by holdings: the creator's choice)
-    +  its concept (always on, at the creator's strength)
 Visitors can also ask it questions (one global line per coin).
 """
 from __future__ import annotations
@@ -64,7 +62,7 @@ MAX_NEW, SOFT_NEW = 320, 200   # a thought: it ends itself, or at the first sent
 HALF_LIFE, SAT, VISITOR_CAP = 5.0, 3.0, 4.0                      # taps: decay, saturation, one visitor's cap
 QUESTION_MAX, QUESTION_GAP, QUESTION_LEN = 10, 30.0, 200
 EMOTIONS = ["joy", "sadness", "anger", "fear", "calm", "curiosity"]
-BUTTONS = EMOTIONS + ["unmask", "concept"]
+BUTTONS = EMOTIONS + ["unmask"]
 SKINS = ["porcelain", "chrome", "matte", "glass"]
 MARKS = ["none", "circuit", "claws", "tears", "split", "stardust", "kintsugi", "tally"]   # (older coins' "scar" is still drawn)
 STEER_MODES = ["everyone", "holders", "weighted"]
@@ -118,12 +116,12 @@ class Coin:
         self.awake_since = 0.0
         self.turn: dict | None = None    # the reply being written: {id, tokens, asked, start}
         self.line = ""                   # the last words it said (explore cards)
-        self.e_last = None               # its last readout (6 feelings + concept)
+        self.e_last = None               # its last readout (6 feelings)
         self.steer: dict = {}
         self.follow_i = 0
         self.short = 0
         self.history: list = []          # (nudge, reply) of this conversation (for a fresh start)
-        self.ready = d.get("concept_ready", False) or not d.get("concept")
+        self.ready = True
         self.holdings: dict = {}         # sim market: who holds how much (cid -> SOL in)
 
     @property
@@ -138,9 +136,6 @@ class Coin:
             return float("inf")
         return max(0.0, self.balance()) / (COST_SOL_HOUR / 3600)
 
-    def concept_label(self) -> str | None:
-        return f"c:{self.id}" if self.d.get("concept") else None
-
     def summary(self) -> dict:
         m = self.market.summary()
         tl = self.time_left()
@@ -149,7 +144,7 @@ class Coin:
                 "price": m["price"], "mcap_sol": m["mcap_sol"], "change_5m": m["change_5m"], "change_1h": m["change_1h"],
                 "volume_sol": m["volume_sol"], "curve": m["curve"], "time_left": None if tl == float("inf") else round(tl),
                 "featured": bool(self.d.get("featured")), "created": self.d["created"], "model": self.d["model"],
-                "concept": (self.d.get("concept") or {}).get("name"), "temperament": self.d.get("temperament_name"),
+                "temperament": self.d.get("temperament_name"),
                 "viewers": len(self.clients), "market": self.market.kind, "img": f"api/img/{self.id}.png" if (STATE / "img" / f"{self.id}.png").exists() else None,
                 "intensity": round(self.intensity(), 3)}
 
@@ -201,7 +196,7 @@ class Coin:
 
     # -------------------------------------------------------------- the push
     def mix(self) -> dict:
-        """Its steering right now: temperament + the chart + the crowd + its concept (units of residual norm)."""
+        """Its steering right now: temperament + the crowd (units of residual norm)."""
         steer = {e: 0.0 for e in EMOTIONS}
         for e, w in (self.d.get("temperament") or {}).items():
             if e in steer:
@@ -213,9 +208,6 @@ class Coin:
         for e in EMOTIONS:
             steer[e] = min(steer[e], lv(e, "toomuch", 0.9))
         steer["assistant"] = -crowd["unmask"] * lv("assistant", "lot", 0.5)
-        c = self.d.get("concept")
-        if c:   # the concept's base push is gentler than its slider (it adds to everything else); the crowd can raise it
-            steer[self.concept_label()] = 0.7 * float(c.get("strength", 0.5)) * (1 + 0.6 * crowd["concept"])
         # one budget for everything together: past a strong single push (0.75 of the residual norm) the text
         # degenerates into loops, so the whole mix is scaled down to fit
         size = math.sqrt(sum(v * v for v in steer.values()))
@@ -245,7 +237,7 @@ def load_coins():
             "name": "Steer AI", "ticker": "STEER", "featured": True, "temperament": {}, "temperament_name": "even",
             "persona": ("You are Qwen3.5-9B, an AI language model, on a live stream. Talk about yourself: what you are, "
                         "what it's like to be you, and the people watching you."),
-            "look": {"skin": "porcelain", "eye": "#7fe7ff", "marks": "none"}, "concept": None, "steer_mode": "everyone",
+            "look": {"skin": "porcelain", "eye": "#7fe7ff", "marks": "none"}, "steer_mode": "everyone",
         })
         COINS[flagship["id"]] = Coin(flagship)
         COINS[flagship["id"]].save()
@@ -259,12 +251,12 @@ def load_coins():
 
 def new_coin_doc(f: dict) -> dict:
     cid = re.sub(r"[^a-z0-9]", "", f["ticker"].lower())[:10] + "-" + secrets.token_hex(3)
-    return {"id": cid, "name": f["name"], "ticker": f["ticker"].upper(), "persona": f["persona"], "concept": f.get("concept"),
+    return {"id": cid, "name": f["name"], "ticker": f["ticker"].upper(), "persona": f["persona"],
             "temperament": f.get("temperament") or {}, "temperament_name": f.get("temperament_name"), "look": f["look"],
             "model": f.get("model", "qwen3.5-9b"), "steer_mode": f.get("steer_mode", "everyone"), "created": time.time(),
             "creator": f.get("creator"), "featured": bool(f.get("featured")), "mint": f.get("mint"),
             "market": f.get("market", "sim"), "fee_to_compute": bool(f.get("fee_to_compute")),
-            "ledger": {"grant_sol": FREE_SECONDS * COST_SOL_HOUR / 3600, "spent_sol": 0.0}, "mu": None, "concept_ready": False}
+            "ledger": {"grant_sol": FREE_SECONDS * COST_SOL_HOUR / 3600, "spent_sol": 0.0}, "mu": None}
 
 
 # ---------------------------------------------------------------------------------------------- the engine
@@ -275,13 +267,6 @@ def load_engine():
     chat.load(DIRS / "chat_dirs.pt")
     mm = MultiMind(chat, step_rate=STEP_RATE)
     ENGINE.update(chat=chat, mm=mm)
-    for c in COINS.values():      # concept directions already built (saved with the coin)
-        cpath = STATE / "concepts" / f"{c.id}.pt"
-        if c.d.get("concept") and cpath.exists():
-            import torch
-            v = torch.load(cpath)
-            mm.add_direction(c.concept_label(), v["direction"], v["mu"], v["sd"])
-            c.ready = True
     threading.Thread(target=engine_loop, daemon=True).start()
     ENGINE["loading"] = False
     print(f"[lp] ready: {CHAT}; {len(COINS)} coins", flush=True)
@@ -290,7 +275,7 @@ def load_engine():
 def engine_loop():
     mm = ENGINE["mm"]
     while not STOP.is_set():
-        while ENGINE["jobs"]:          # jobs that need the model (concept directions, fresh starts): between steps
+        while ENGINE["jobs"]:          # jobs that need the model (fresh starts): between steps
             fn = ENGINE["jobs"].pop(0)
             try:
                 fn()
@@ -403,11 +388,10 @@ def on_token(c: Coin, tok: dict):
         return
     labels = ENGINE["chat"].labels
     sel = [labels.index(e) for e in EMOTIONS]
-    cl = c.concept_label()
-    e = [tok["e"][i] for i in sel] + [tok["e"][labels.index(cl)] if cl and cl in labels else 0.0]
+    e = [tok["e"][i] for i in sel]
     m = labels.index("assistant") if "assistant" in labels else None
     w = {"t": tok["t"], "e": [round(x, 2) for x in e], "p": tok["p"], "a": tok["a"][:4],
-         "s": [round(c.steer.get(x, 0.0), 2) for x in EMOTIONS] + [round(c.steer.get(cl, 0.0), 2) if cl else 0.0],
+         "s": [round(c.steer.get(x, 0.0), 2) for x in EMOTIONS],
          "m": round(tok["e"][m], 2) if m is not None else None, "at": round(time.time(), 2)}
     c.turn["tokens"].append(w)
     c.e_last = w["e"]
@@ -668,13 +652,13 @@ def coin_state(c: Coin, cid: str | None = None) -> dict:
     s.update(type="state", mix={b: round(v, 3) for b, v in mix.items()}, steer={k: round(v, 3) for k, v in c.steer.items() if k in EMOTIONS},
              qn=len(c.questions), qs=[q["q"][:90] for q in c.questions[:3]],
              qids=[q["id"] for q in c.questions], asking=c.asking["q"] if c.asking else None, asking_id=c.asking["id"] if c.asking else None,
-             persona=c.d["persona"], steer_mode=c.d.get("steer_mode"), concept_full=c.d.get("concept"), temperament_mix=c.d.get("temperament"),
+             persona=c.d["persona"], steer_mode=c.d.get("steer_mode"), temperament_mix=c.d.get("temperament"),
              balance_sol=round(c.balance(), 6), fees_sol=round(c.market.fees_sol, 6))
     s["sol_usd"] = lp_pump.SOL_USD["usd"]
     return s
 
 
-STATIC = ("id", "name", "ticker", "look", "mu", "featured", "created", "model", "concept", "temperament", "market", "img")
+STATIC = ("id", "name", "ticker", "look", "mu", "featured", "created", "model", "temperament", "market", "img")
 
 
 def live_fields(s: dict) -> dict:
@@ -841,7 +825,7 @@ def launch_source(f: dict, req: Request) -> str:
     return str(f.get("creator") or req.headers.get("x-forwarded-for", "").split(",")[0].strip() or (req.client.host if req.client else "?"))
 
 
-async def gate(f: dict, req: Request, name: str, persona: str, concept: str, demo: bool = False):
+async def gate(f: dict, req: Request, name: str, persona: str, demo: bool = False):
     """Before anything is created (on pump.fun or here): the launch rate limits (not for demo coins, which only this
     machine and the private test site can make), then the character's moderation."""
     now, src = time.time(), launch_source(f, req)
@@ -850,7 +834,7 @@ async def gate(f: dict, req: Request, name: str, persona: str, concept: str, dem
         raise HTTPException(429, "Lots of launches right now. Try again in a little while.")
     if MODERATION and ENGINE["mm"] is not None:
         from lp_moderate import flagged
-        p_bad = await job(lambda: flagged(ENGINE["chat"], name, persona, concept))
+        p_bad = await job(lambda: flagged(ENGINE["chat"], name, persona))
         if p_bad > 0.5:
             raise HTTPException(400, "That character can't go live here. Try a different one.")
 
@@ -866,11 +850,6 @@ async def api_create(req: Request):
         raise HTTPException(400, "A name, a ticker and a character (a sentence or two) are needed.")
     if any(c.d["ticker"] == ticker and c.market.kind != "sim" for c in COINS.values()):
         raise HTTPException(400, f"${ticker} is taken.")
-    concept = None
-    cf = f.get("concept") or {}
-    if cf.get("name"):
-        concept = {"name": clean(cf["name"], 60, "concept"), "examples": [clean(x, 200, "concept") for x in (cf.get("examples") or [])[:5] if str(x).strip()],
-                   "strength": max(0.15, min(0.9, float(cf.get("strength", 0.5))))}
     temp = {e: max(0.0, min(1.0, float(v))) for e, v in (f.get("temperament") or {}).items() if e in EMOTIONS}
     look = f.get("look") or {}
     hexc = lambda v, d: v if re.fullmatch(r"#[0-9a-fA-F]{6}", str(v or "")) else d
@@ -891,10 +870,10 @@ async def api_create(req: Request):
         if not ours:
             raise HTTPException(400, why)
     if not (market == "pump" and mint in PREPARED):    # (a pump.fun launch was checked before its transaction)
-        await gate(f, req, name, persona, (concept or {}).get("name", ""), demo=market == "sim")
+        await gate(f, req, name, persona, demo=market == "sim")
     if market != "sim":
         LAUNCH_LOG.append((now, src))
-    d = new_coin_doc({"name": name, "ticker": ticker, "persona": persona, "concept": concept, "temperament": temp,
+    d = new_coin_doc({"name": name, "ticker": ticker, "persona": persona, "temperament": temp,
                       "temperament_name": f.get("temperament_name"), "look": look, "steer_mode": mode, "model": model,
                       "creator": str(f.get("creator") or "")[:64] or None, "mint": mint, "market": market,
                       "fee_to_compute": market == "pump" and bool(lp_pump.settings()["treasury"])})
@@ -908,25 +887,7 @@ async def api_create(req: Request):
     c.save()
     if market == "pump":
         asyncio.ensure_future(c.market.seed())
-    if concept:
-        asyncio.ensure_future(build(c))
     return {"id": c.id, "ready": c.ready}
-
-
-async def build(c: Coin):
-    from lp_concepts import build_concept
-    import torch
-    while ENGINE["mm"] is None:
-        await asyncio.sleep(1)
-    cpt = c.d["concept"]
-    t0 = time.time()
-    v = await job(lambda: build_concept(ENGINE["chat"], cpt["name"], cpt["examples"]))
-    (STATE / "concepts").mkdir(parents=True, exist_ok=True)
-    torch.save({"direction": v["direction"].cpu(), "mu": v["mu"], "sd": v["sd"]}, STATE / "concepts" / f"{c.id}.pt")
-    await job(lambda: ENGINE["mm"].add_direction(c.concept_label(), v["direction"], v["mu"], v["sd"]))
-    c.ready, c.d["concept_ready"] = True, True
-    c.save()
-    print(f"[lp] concept for {c.id} ({cpt['name']!r}) built in {time.time() - t0:.1f} s", flush=True)
 
 
 @app.post("/api/coins/{cid}/trade")
@@ -994,7 +955,7 @@ async def api_pump_prepare(req: Request):
         raise HTTPException(400, "A name, a ticker and a character (a sentence or two) are needed.")
     if any(c.d["ticker"] == f["ticker"] and c.market.kind != "sim" for c in COINS.values()):
         raise HTTPException(400, f"${f['ticker']} is taken.")
-    await gate(f, req, f["name"], persona, clean((f.get("concept") or {}).get("name", ""), 60, "concept"))
+    await gate(f, req, f["name"], persona)
     if not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", str(f.get("creator") or "")) or not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", str(f.get("mint") or "")):
         raise HTTPException(400, "A wallet and a mint address are needed.")
     try:

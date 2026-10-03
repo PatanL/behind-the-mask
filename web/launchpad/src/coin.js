@@ -89,18 +89,17 @@ function chart() {
 }
 
 // ---- steering
-const BTNS = ORDER.map((e) => [e, EMO[e].label, EMO[e].color]);   // the six feelings; its hidden obsession is the extra button (no Off script here)
+const BTNS = ORDER.map((e) => [e, EMO[e].label, EMO[e].color]);   // the six feelings (no Off script here)
 const pending = {};
 function buildTaps(d) {
   const host = $('#taps');
   if (host.childElementCount) return;
-  const all = d.concept ? [...BTNS, ['concept', `More ${d.concept}`, '#9fb4ff']] : BTNS;
-  for (const [b, label, color] of all) {
-    const el = h('button', { class: `tapb${b === 'concept' ? ' wide' : ''}`, 'data-b': b, style: `--c:${color}` }, label);
+  for (const [b, label, color] of BTNS) {
+    const el = h('button', { class: 'tapb', 'data-b': b, style: `--c:${color}` }, label);
     el.onpointerdown = (e) => { e.preventDefault(); pending[b] = (pending[b] || 0) + 1; el.style.setProperty('--heat', '1'); setTimeout(() => el.style.setProperty('--heat', '0'), 220); };
     host.append(el);
   }
-  $('#mix').append(...all.map(([b, , color]) => h('i', { 'data-b': b, style: `background:${color};width:0` })));
+  $('#mix').append(...BTNS.map(([b, , color]) => h('i', { 'data-b': b, style: `background:${color};width:0` })));
 }
 setInterval(() => {
   if (!ws || ws.readyState !== 1 || !Object.keys(pending).length) return;
@@ -176,9 +175,7 @@ function apply(d) {
   if (first) {
     $('#persona').textContent = d.persona;
     const T = d.temperament_mix || {}, tt = Object.entries(T).filter(([, v]) => v > 0).map(([e, v]) => `${EMO[e]?.label || e} ${Math.round(v * 100)}%`).join(', ') || 'even';
-    const c = d.concept_full;
     $('#char').replaceChildren(
-      h('dt', {}, 'Hidden obsession'), h('dd', {}, c ? `${c.name} (${Math.round(c.strength * 100)}%)` : 'nothing hidden'),
       h('dt', {}, 'Temperament'), h('dd', {}, d.temperament ? `${d.temperament} · ${tt}` : tt),
       h('dt', {}, 'Look'), h('dd', {}, `${d.look.skin}, ${d.look.marks === 'none' ? 'unmarked' : d.look.marks}`, h('span', { style: `display:inline-block;width:10px;height:10px;border-radius:50%;background:${d.look.eye};margin-left:8px;vertical-align:middle` })));
     if (perf && d.mu) perf.reset(d.mu);

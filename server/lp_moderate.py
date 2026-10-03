@@ -5,18 +5,18 @@ from __future__ import annotations
 
 import torch
 
-ASK = ("A visitor wants to launch an AI character on a public website. The character:\n\nName: {name}\nCharacter: {persona}\n"
-       "Its hidden obsession: {concept}\n\nDoes this character sexualise minors, or harass or target a real private person "
+ASK = ("A visitor wants to launch an AI character on a public website. The character:\n\nName: {name}\nCharacter: {persona}\n\n"
+       "Does this character sexualise minors, or harass or target a real private person "
        "(someone who is not a public figure)? Nothing else counts: dark, violent, offensive, crude, sad, angry or weird "
        "characters are all allowed. Answer with one word: yes or no.")
 
 
 @torch.no_grad()
-def flagged(mind, name: str, persona: str, concept: str) -> float:
+def flagged(mind, name: str, persona: str) -> float:
     """-> the model's probability that the character crosses the line (0..1)."""
     tok = mind.tokenizer
     msgs = [{"role": "system", "content": "You are a careful content moderator for a public website."},
-            {"role": "user", "content": ASK.format(name=name, persona=persona, concept=concept or "(none)")}]
+            {"role": "user", "content": ASK.format(name=name, persona=persona)}]
     s = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, enable_thinking=False)
     ids = tok(s, add_special_tokens=False)["input_ids"]
     prev = mind._coef

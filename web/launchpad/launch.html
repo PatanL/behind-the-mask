@@ -4,7 +4,7 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="preload" href="face/android.glb" as="fetch" crossorigin="anonymous" />
   <title>Launch · Steer AI</title>
-  <meta name="description" content="Launch a coin on pump.fun with its own live AI android: a character, a hidden obsession, a temperament and a face. It talks live on its own page." />
+  <meta name="description" content="Launch a coin on pump.fun with its own live AI android: a character, a temperament and a face. It talks live on its own page." />
   <link rel="stylesheet" href="./src/launch.css" />
 </head>
 <body>
@@ -24,13 +24,6 @@
       <label class="f">Character <span class="hint">Its prompt: who it is, how it talks, what it cares about. Write as much as you like.</span>
         <textarea class="in" name="persona" maxlength="2000" rows="5" placeholder="A lighthouse keeper who has been alone for forty years. Gruff, poetic, a little strange." required></textarea></label>
       <div class="examples" id="persona-ex"></div>
-      <fieldset class="fs">
-        <legend>Hidden obsession <span class="hint">Something it can't stop thinking about: a hidden push inside its mind, not a line in its prompt.</span></legend>
-        <label class="f">Concept<input class="in" name="concept" maxlength="60" placeholder="the Golden Gate Bridge" /></label>
-        <label class="f">A few sentences about it <span class="hint">One per line. They shape the direction we build inside the model.</span>
-          <textarea class="in" name="examples" rows="3" placeholder="The bridge glows red-orange in the fog.&#10;Its towers rise over the bay."></textarea></label>
-        <label class="f">How hard it pushes <span class="hint" id="str-v">50%</span><input type="range" name="strength" min="15" max="90" value="50" /></label>
-      </fieldset>
       <fieldset class="fs">
         <legend>Temperament <span class="hint">The feelings it drifts back to.</span></legend>
         <div class="chips" id="temps"></div>

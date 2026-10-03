@@ -1,4 +1,4 @@
-// Launch: choose the android (character, hidden concept, temperament, look), then the coin. (One model for now: the server's default.)
+// Launch: choose the android (character, temperament, look), then the coin. (One model for now: the server's default.)
 import { get, post } from './api.js';
 import { $, h, header, footer } from './ui.js';
 import { Stage } from '../../src/stage.js';
@@ -76,7 +76,6 @@ function init() {
 }
 stage.ready.then(preview);
 form.name.oninput = preview;
-form.strength.oninput = () => { $('#str-v').textContent = `${form.strength.value}%`; };
 
 /** The android's portrait, square, from the live preview (the coin's image). */
 function portrait() {
@@ -95,7 +94,6 @@ form.onsubmit = async (e) => {
   try {
     const body = {
       name: form.name.value.trim(), ticker: form.ticker.value.trim(), persona: form.persona.value.trim(),
-      concept: form.concept.value.trim() ? { name: form.concept.value.trim(), examples: form.examples.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 5), strength: form.strength.value / 100 } : null,
       temperament: temp, temperament_name: tempName, look: { ...look }, steer_mode: form.steer_mode.value, image: portrait(), market,
     };
     body.devBuy = Number(form.dev_buy.value || 0);
