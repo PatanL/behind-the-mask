@@ -286,6 +286,11 @@ def warm_up(mm):
             for _ in range(4):
                 mm.step()
             mm.remove("warm")
+        for b in range(16):   # and a step with every batch size up to 16 rows (some kernels tune for each)
+            mm.add(Row(key=f"warm{b}", max_new=50), ids[:8])
+            mm.step(); mm.step()
+        for b in range(16):
+            mm.remove(f"warm{b}")
     except Exception as e:  # noqa: BLE001
         print("[lp] warm-up failed:", repr(e), flush=True)
         mm.remove("warm")
